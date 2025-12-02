@@ -1,0 +1,99 @@
+version: '3.8'
+
+services:
+  collector:
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+    container_name: stats-collector
+    environment:
+      # TP-Link API credentials
+      - TPLINK_CLIENT_ID=${TPLINK_CLIENT_ID:-fdcae128-0adf-4233-8a58-30760652bd16}
+      - TPLINK_CLIENT_SECRET=${TPLINK_CLIENT_SECRET}
+      - TPLINK_API_KEY=${TPLINK_API_KEY:-e71bf02f-8b71-42ee-8af0-62a7bdf6c866}
+      - TPLINK_REFRESH_TOKEN=${TPLINK_REFRESH_TOKEN}
+      # InfluxDB connection
+      - INFLUXDB_URL=http://influxdb:8086
+      - INFLUXDB_ORG=${INFLUXDB_ORG:-GOS}
+      - INFLUXDB_BUCKET=${INFLUXDB_BUCKET:-rem}
+      - INFLUXDB_TOKEN=${INFLUXDB_TOKEN}
+      # Collector settings
+      - POLL_INTERVAL=${POLL_INTERVAL:-30}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - CONF_FILE=/app/config/config.yaml
+      - TOKEN_FILE=/app/data/refresh_token.txt
+    volumes:
+      - ./app/config:/app/config:ro
+      - collector-data:/app/data
+    depends_on:
+      - influxdb
+    restart: unless-stopped
+    networks:
+      - stats-network
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "collector.py"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  influxdb:
+    image: influxdb:2.7-alpine
+    container_name: stats-influxdb
+    environment:
+      - DOCKER_INFLUXDB_INIT_MODE=setup
+      - DOCKER_INFLUXDB_INIT_USERNAME=${INFLUXDB_ADMIN_USER:-admin}
+      - DOCKER_INFLUXDB_INIT_PASSWORD=${INFLUXDB_ADMIN_PASSWORD:-change-me-in-production}
+      - DOCKER_INFLUXDB_INIT_ORG=${INFLUXDB_ORG:-GOS}
+      - DOCKER_INFLUXDB_INIT_BUCKET=${INFLUXDB_BUCKET:-rem}
+      - DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=${INFLUXDB_TOKEN}
+      - DOCKER_INFLUXDB_INIT_RETENTION=90d
+    volumes:
+      - influxdb-data:/var/lib/influxdb2
+    ports:
+      - "${INFLUXDB_PORT:-7002}:8086"
+    restart: unless-stopped
+    networks:
+      - stats-network
+    healthcheck:
+      test: ["CMD", "influx", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  grafana:
+    image: grafana/grafana:10.4.2
+    container_name: stats-grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-change-me-in-production}
+      - GF_SERVER_ROOT_URL=${GRAFANA_ROOT_URL:-http://localhost:7003}
+      - GF_INSTALL_PLUGINS=
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    ports:
+      - "${GRAFANA_PORT:-7003}:3000"
+    depends_on:
+      - influxdb
+    restart: unless-stopped
+    networks:
+      - stats-network
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  collector-data:
+    driver: local
+  influxdb-data:
+    driver: local
+  grafana-data:
+    driver: local
+
+networks:
+  stats-network:
+    driver: bridge
+
