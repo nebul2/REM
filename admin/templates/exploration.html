@@ -1,0 +1,295 @@
+{% extends "base.html" %}
+
+{% block title %}GOS REM - Data Exploration{% endblock %}
+
+{% block page_subtitle %}Data Exploration & Analysis{% endblock %}
+
+{% block nav_exploration_active %}active{% endblock %}
+
+{% block extra_head %}
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+{% endblock %}
+
+{% block content %}
+        <!-- Controls Panel -->
+        <section class="controls-panel">
+            <div class="control-group">
+                <label>Experiment A:</label>
+                <select id="experimentA" class="experiment-select">
+                    <option value="">-- Select Experiment --</option>
+                </select>
+                <button id="createExperimentBtn" class="btn btn-secondary">Create New</button>
+            </div>
+            
+            <div class="control-group">
+                <label>Experiment B:</label>
+                <select id="experimentB" class="experiment-select">
+                    <option value="">-- Select Experiment --</option>
+                </select>
+            </div>
+            
+            <div class="control-group">
+                <label>Time Range:</label>
+                <select id="timeRange" class="time-range-select">
+                    <option value="15m">Last 15 minutes</option>
+                    <option value="1h" selected>Last 1 hour</option>
+                    <option value="6h">Last 6 hours</option>
+                    <option value="24h">Last 24 hours</option>
+                    <option value="custom">Custom Range</option>
+                </select>
+                <div id="customRange" class="custom-range" style="display: none;">
+                    <input type="datetime-local" id="startTime">
+                    <input type="datetime-local" id="endTime">
+                    <button id="applyCustomRange" class="btn btn-primary">Apply</button>
+                </div>
+            </div>
+            
+            <div class="control-group">
+                <label>Aggregation:</label>
+                <select id="aggregation" class="aggregation-select">
+                    <option value="10s">10 seconds</option>
+                    <option value="30s">30 seconds</option>
+                    <option value="1m" selected>1 minute</option>
+                    <option value="5m">5 minutes</option>
+                    <option value="15m">15 minutes</option>
+                    <option value="1h">1 hour</option>
+                </select>
+            </div>
+        </section>
+
+        <!-- Charts Section -->
+        <section class="charts-section">
+            <!-- Experiment A Chart -->
+            <div class="chart-container" id="chartContainerA">
+                <div class="chart-header">
+                    <h2 id="chartATitle">Experiment A - Power Consumption</h2>
+                    <div class="chart-header-actions">
+                        <div class="chart-stats" id="statsA">
+                            <span class="stat-item">Total: <strong id="totalA">0</strong> kWh</span>
+                            <span class="stat-item">Avg: <strong id="avgA">0</strong> W</span>
+                            <span class="stat-item">Mean: <strong id="meanA">0</strong> W</span>
+                            <span class="stat-item">Median: <strong id="medianA">0</strong> W</span>
+                        </div>
+                        <button onclick="toggleFullscreen('chartContainerA')" class="btn-icon" title="Fullscreen">
+                            ⛶
+                        </button>
+                    </div>
+                </div>
+                <div class="chart-wrapper">
+                    <canvas id="chartA"></canvas>
+                </div>
+            </div>
+            
+            <!-- Experiment B Chart -->
+            <div class="chart-container" id="chartContainerB" style="display: none;">
+                <div class="chart-header">
+                    <h2 id="chartBTitle">Experiment B - Power Consumption</h2>
+                    <div class="chart-header-actions">
+                        <div class="chart-stats" id="statsB">
+                            <span class="stat-item">Total: <strong id="totalB">0</strong> kWh</span>
+                            <span class="stat-item">Avg: <strong id="avgB">0</strong> W</span>
+                            <span class="stat-item">Mean: <strong id="meanB">0</strong> W</span>
+                            <span class="stat-item">Median: <strong id="medianB">0</strong> W</span>
+                        </div>
+                        <button onclick="toggleFullscreen('chartContainerB')" class="btn-icon" title="Fullscreen">
+                            ⛶
+                        </button>
+                    </div>
+                </div>
+                <div class="chart-wrapper">
+                    <canvas id="chartB"></canvas>
+                </div>
+            </div>
+        </section>
+
+        <!-- Controls -->
+        <section class="feature-controls">
+            <div class="control-row">
+                <label class="toggle-label">
+                    <input type="checkbox" id="showDevices" checked>
+                    <span>Show Device Lines</span>
+                </label>
+                <label class="toggle-label">
+                    <input type="checkbox" id="showMean" checked>
+                    <span>Show Mean</span>
+                </label>
+                <label class="toggle-label">
+                    <input type="checkbox" id="showMedian" checked>
+                    <span>Show Median</span>
+                </label>
+                <label class="toggle-label">
+                    <input type="checkbox" id="showTotal" checked>
+                    <span>Show Total</span>
+                </label>
+                <label class="toggle-label">
+                    <input type="checkbox" id="showAverage" checked>
+                    <span>Show Average</span>
+                </label>
+                <label class="toggle-label">
+                    <input type="checkbox" id="splitCharts">
+                    <span>Split Charts</span>
+                </label>
+            </div>
+            
+            <div class="action-buttons">
+                <button id="addAnnotationBtn" class="btn btn-primary">
+                    📌 Add Annotation
+                </button>
+                <button id="saveSnapshotBtn" class="btn btn-success">
+                    💾 Save Snapshot
+                </button>
+                <button id="refreshBtn" class="btn btn-secondary">
+                    🔄 Refresh Data
+                </button>
+                <div class="curve-type-control">
+                    <label>Curve Type:</label>
+                    <select id="curveType" class="aggregation-select">
+                        <option value="smooth" selected>Smooth (Bezier)</option>
+                        <option value="monotone">Monotone Cubic</option>
+                        <option value="linear">Linear</option>
+                        <option value="step">Step</option>
+                        <option value="stepped-after">Stepped After</option>
+                    </select>
+                </div>
+            </div>
+        </section>
+{% endblock %}
+
+{% block extra_scripts %}
+    <!-- Modals -->
+    <!-- Create Experiment Modal -->
+    <div id="createExperimentModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeModal('createExperimentModal')">&times;</span>
+            <h2>Create New Experiment</h2>
+            <form id="createExperimentForm" onsubmit="createExperiment(event)">
+                <div class="form-group">
+                    <label>Experiment Name:</label>
+                    <input type="text" id="experimentName" required placeholder="e.g., Experiment 1 - HLS Streaming">
+                </div>
+                <div class="form-group">
+                    <label>Description:</label>
+                    <textarea id="experimentDescription" rows="3" placeholder="Optional description"></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Select Devices:</label>
+                    <div class="device-checkboxes" id="experimentDevices">
+                        <!-- Populated by JavaScript -->
+                    </div>
+                    <div class="checkbox-actions">
+                        <button type="button" onclick="selectAllDevices()">Select All</button>
+                        <button type="button" onclick="deselectAllDevices()">Deselect All</button>
+                    </div>
+                </div>
+                <button type="submit" class="btn btn-primary">Create Experiment</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Add Annotation Modal -->
+    <div id="addAnnotationModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeModal('addAnnotationModal')">&times;</span>
+            <h2>Add Annotation</h2>
+            <form id="addAnnotationForm" onsubmit="addAnnotation(event)">
+                <div class="form-group">
+                    <label>Experiment:</label>
+                    <select id="annotationExperiment" required>
+                        <option value="">-- Select Experiment --</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Label:</label>
+                    <input type="text" id="annotationLabel" required placeholder="e.g., Started HLS Stream">
+                </div>
+                <div class="form-group">
+                    <p style="color: #666; font-size: 0.9rem; margin: 0;">
+                        Note: Annotation will be placed at the center of the current chart time range
+                    </p>
+                </div>
+                <div class="form-group">
+                    <label>Description:</label>
+                    <textarea id="annotationDescription" rows="3" placeholder="Optional description"></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Color:</label>
+                    <input type="color" id="annotationColor" value="#007bff">
+                </div>
+                <button type="submit" class="btn btn-primary">Add Annotation</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Save Snapshot Modal -->
+    <div id="saveSnapshotModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeModal('saveSnapshotModal')">&times;</span>
+            <h2>Save Snapshot</h2>
+            <form id="saveSnapshotForm" onsubmit="saveSnapshot(event)">
+                <div class="form-group">
+                    <label>Title:</label>
+                    <input type="text" id="snapshotTitle" required placeholder="e.g., Baseline Measurement">
+                </div>
+                <div class="form-group">
+                    <label>Description:</label>
+                    <textarea id="snapshotDescription" rows="3" placeholder="Optional description"></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Experiment:</label>
+                    <select id="snapshotExperiment" required>
+                        <option value="">-- Select Experiment --</option>
+                    </select>
+                </div>
+                <button type="submit" class="btn btn-primary">Save Snapshot</button>
+            </form>
+        </div>
+    </div>
+
+        <!-- Collector Control Panel (moved to bottom) -->
+        <section class="controls-panel" style="margin-top: 20px;">
+            <div class="control-group">
+                <label>Data Collection:</label>
+                <label class="toggle-label" style="display: flex; align-items: center; gap: 10px;">
+                    <input type="checkbox" id="collectorEnabled" checked>
+                    <span>Polling Enabled</span>
+                    <span id="collectorStatus" style="font-size: 0.85rem; color: #666; margin-left: auto;">
+                        <span id="collectorRunningStatus">●</span> <span id="collectorStatusText">Loading...</span>
+                    </span>
+                </label>
+            </div>
+            
+            <div class="control-group">
+                <label>Polling Frequency:</label>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <input type="number" id="pollInterval" min="5" max="300" value="30" step="5" style="width: 80px; padding: 8px; border: 2px solid var(--gos-border); border-radius: 6px;">
+                    <span>seconds</span>
+                    <button id="updatePollInterval" class="btn btn-primary" style="margin-left: 10px;">Update</button>
+                </div>
+                <p style="font-size: 0.85rem; color: #666; margin-top: 5px;">
+                    Current: <span id="currentPollInterval">-</span>s | 
+                    <span style="color: #e74c3c;">⚠️ Lower values may hit API rate limits</span>
+                </p>
+            </div>
+        </section>
+        
+        <!-- Stats Explanation (moved to bottom) -->
+        <section class="controls-panel" style="margin-top: 15px; background: #f8f9fa; padding: 15px;">
+            <details>
+                <summary style="cursor: pointer; font-weight: 600; color: var(--gos-green-dark);">📊 What do these stats mean?</summary>
+                <div style="margin-top: 10px; font-size: 0.9rem; line-height: 1.6;">
+                    <p><strong>Total (kWh):</strong> Total energy consumed over the visible time range. Calculated by integrating power over time.</p>
+                    <p><strong>Avg (W):</strong> Average power consumption across all visible devices and time points in the selected range.</p>
+                    <p><strong>Mean (W):</strong> Statistical mean (average) of all power readings in the visible time range.</p>
+                    <p><strong>Median (W):</strong> Middle value when all power readings are sorted - less affected by spikes/outliers than mean.</p>
+                    <p style="margin-top: 10px; color: #666; font-style: italic;">
+                        💡 <strong>Tip:</strong> These stats update based on your selected time range. Zoom/pan the chart to see stats for specific periods!
+                    </p>
+                </div>
+            </details>
+        </section>
+
+    <script src="/static/exploration.js"></script>
+{% endblock %}

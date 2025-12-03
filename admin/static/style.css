@@ -1,0 +1,372 @@
+/* GOS REM Group Management - GoS Green Theme */
+
+:root {
+    --gos-green: #6B8E5A;
+    --gos-green-dark: #4A6B3A;
+    --gos-green-light: #8FA87A;
+    --gos-white: #FFFFFF;
+    --gos-gray: #F5F5F5;
+    --gos-gray-dark: #333333;
+    --gos-border: #E0E0E0;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    background: var(--gos-gray);
+    color: var(--gos-gray-dark);
+    line-height: 1.6;
+    min-height: 100vh;
+}
+
+.container {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 0 20px;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .header-content {
+        flex-direction: column;
+        gap: 20px;
+    }
+    
+    .header-nav {
+        width: 100%;
+        justify-content: center;
+    }
+}
+
+/* Header */
+.gos-header {
+    background: linear-gradient(135deg, var(--gos-green) 0%, var(--gos-green-dark) 100%);
+    color: var(--gos-white);
+    padding: 20px 0;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+    margin-bottom: 30px;
+}
+
+.header-content {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 0 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.logo-section {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+.gos-logo img {
+    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.2));
+    height: 50px;
+    width: auto;
+}
+
+.header-text h1 {
+    font-size: 1.8rem;
+    margin-bottom: 5px;
+}
+
+.header-text p {
+    font-size: 0.9rem;
+    opacity: 0.9;
+}
+
+.header-nav {
+    display: flex;
+    gap: 20px;
+}
+
+.nav-link {
+    color: var(--gos-white);
+    text-decoration: none;
+    padding: 8px 16px;
+    border-radius: 6px;
+    transition: background 0.3s;
+}
+
+.nav-link:hover, .nav-link.active {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+.card {
+    background: var(--gos-white);
+    border-radius: 12px;
+    padding: 30px;
+    margin-bottom: 30px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.card h2 {
+    color: var(--gos-green-dark);
+    margin-bottom: 20px;
+    font-size: 1.8rem;
+}
+
+.form-group {
+    margin-bottom: 25px;
+}
+
+.form-group label {
+    display: block;
+    font-weight: 600;
+    margin-bottom: 10px;
+    color: var(--gos-gray-dark);
+}
+
+.form-group input[type="text"] {
+    width: 100%;
+    padding: 12px;
+    border: 2px solid var(--gos-border);
+    border-radius: 8px;
+    font-size: 1rem;
+    transition: border-color 0.3s;
+}
+
+.form-group input[type="text"]:focus {
+    outline: none;
+    border-color: var(--gos-green);
+}
+
+.device-checkboxes {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 10px;
+    max-height: 400px;
+    overflow-y: auto;
+    padding: 15px;
+    background: var(--gos-gray);
+    border-radius: 8px;
+    border: 2px solid var(--gos-border);
+}
+
+.checkbox-label {
+    display: flex;
+    align-items: center;
+    padding: 8px;
+    background: var(--gos-white);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.checkbox-label:hover {
+    background: #e8f5e9;
+}
+
+.checkbox-label input[type="checkbox"] {
+    margin-right: 10px;
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+}
+
+.checkbox-actions {
+    margin-top: 10px;
+    display: flex;
+    gap: 10px;
+}
+
+.checkbox-actions button {
+    padding: 8px 16px;
+    background: var(--gos-green);
+    color: var(--gos-white);
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    transition: background-color 0.3s;
+}
+
+.checkbox-actions button:hover {
+    background: var(--gos-green-dark);
+}
+
+.btn {
+    padding: 12px 24px;
+    border: none;
+    border-radius: 8px;
+    font-size: 1rem;
+    cursor: pointer;
+    font-weight: 600;
+    transition: all 0.3s;
+}
+
+.btn-primary {
+    background: var(--gos-green);
+    color: var(--gos-white);
+}
+
+.btn-primary:hover {
+    background: var(--gos-green-dark);
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(107, 142, 90, 0.4);
+}
+
+.btn-small {
+    padding: 6px 12px;
+    font-size: 0.85rem;
+}
+
+.btn-danger {
+    background: #e74c3c;
+    color: white;
+}
+
+.btn-danger:hover {
+    background: #c0392b;
+}
+
+.group-item {
+    background: var(--gos-gray);
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 15px;
+    border: 2px solid var(--gos-border);
+}
+
+.group-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+}
+
+.group-header h3 {
+    color: var(--gos-green-dark);
+    font-size: 1.3rem;
+}
+
+.group-actions {
+    display: flex;
+    gap: 10px;
+}
+
+.group-devices {
+    margin-bottom: 10px;
+}
+
+.group-devices ul {
+    list-style: none;
+    margin-top: 10px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.group-devices li {
+    background: var(--gos-white);
+    padding: 6px 12px;
+    border-radius: 6px;
+    border: 1px solid var(--gos-border);
+}
+
+.group-meta {
+    color: #888;
+    font-size: 0.9rem;
+}
+
+.empty-state {
+    text-align: center;
+    color: #888;
+    padding: 40px;
+    font-style: italic;
+}
+
+/* Modal */
+.modal {
+    display: none;
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.5);
+    overflow: auto;
+}
+
+.modal-content {
+    background-color: var(--gos-white);
+    margin: 50px auto;
+    padding: 30px;
+    border-radius: 12px;
+    width: 90%;
+    max-width: 800px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+    position: relative;
+}
+
+.modal-content h2 {
+    color: var(--gos-green-dark);
+    margin-bottom: 20px;
+}
+
+.close {
+    color: #aaa;
+    float: right;
+    font-size: 28px;
+    font-weight: bold;
+    cursor: pointer;
+    position: absolute;
+    right: 20px;
+    top: 20px;
+}
+
+.close:hover {
+    color: var(--gos-gray-dark);
+}
+
+#editGroupName {
+    color: var(--gos-green-dark);
+}
+
+/* Loading and Messages */
+.message {
+    padding: 15px;
+    border-radius: 8px;
+    margin-bottom: 20px;
+    font-weight: 500;
+}
+
+.message.success {
+    background: #d4edda;
+    color: #155724;
+    border: 1px solid #c3e6cb;
+}
+
+.message.error {
+    background: #f8d7da;
+    color: #721c24;
+    border: 1px solid #f5c6cb;
+}
+
+/* Scrollbar styling */
+.device-checkboxes::-webkit-scrollbar {
+    width: 8px;
+}
+
+.device-checkboxes::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 4px;
+}
+
+.device-checkboxes::-webkit-scrollbar-thumb {
+    background: var(--gos-green);
+    border-radius: 4px;
+}
+
+.device-checkboxes::-webkit-scrollbar-thumb:hover {
+    background: var(--gos-green-dark);
+}

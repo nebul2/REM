@@ -8,10 +8,9 @@ datasources:
     isDefault: true
     jsonData:
       version: Flux
-      organization: ${INFLUXDB_ORG:-GOS}
-      defaultBucket: ${INFLUXDB_BUCKET:-rem}
+      organization: GOS
+      defaultBucket: rem
       tlsSkipVerify: true
     secureJsonData:
-      token: ${INFLUXDB_TOKEN}
+      token: gwTu1qAtPgIRU8eWNpLXuz92pKo6_lgV7Y4mhdMM7n_XOe-fTXts7T54P_FQJ69UMVuTyhr77Ly7XCGz9QUNAA==
     editable: false
-

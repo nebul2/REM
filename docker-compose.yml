@@ -72,10 +72,12 @@ services:
     volumes:
       - grafana-data:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./admin/data:/app/data:ro
     ports:
       - "${GRAFANA_PORT:-7003}:3000"
     depends_on:
       - influxdb
+      - admin
     restart: unless-stopped
     networks:
       - stats-network
@@ -85,12 +87,40 @@ services:
       timeout: 5s
       retries: 3
 
+  admin:
+    build:
+      context: ./admin
+      dockerfile: Dockerfile
+    container_name: stats-admin
+    environment:
+      - INFLUXDB_URL=http://influxdb:8086
+      - INFLUXDB_ORG=${INFLUXDB_ORG:-GOS}
+      - INFLUXDB_BUCKET=${INFLUXDB_BUCKET:-rem}
+      - INFLUXDB_TOKEN=${INFLUXDB_TOKEN}
+      - DATA_DIR=/app/data
+    volumes:
+      - admin-data:/app/data
+    ports:
+      - "${ADMIN_PORT:-7001}:7001"
+    depends_on:
+      - influxdb
+    restart: unless-stopped
+    networks:
+      - stats-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7001/api/devices"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
 volumes:
   collector-data:
     driver: local
   influxdb-data:
     driver: local
   grafana-data:
+    driver: local
+  admin-data:
     driver: local
 
 networks:

@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+
+{% block title %}GOS REM - Snapshot Gallery{% endblock %}
+
+{% block page_subtitle %}Snapshot Gallery{% endblock %}
+
+{% block nav_gallery_active %}active{% endblock %}
+
+{% block content %}
+        <!-- Filters -->
+        <section class="controls-panel">
+            <div class="control-group">
+                <label>Filter by Experiment:</label>
+                <select id="filterExperiment" class="experiment-select">
+                    <option value="">All Experiments</option>
+                </select>
+            </div>
+            
+            <div class="control-group">
+                <label>Search:</label>
+                <input type="text" id="searchInput" placeholder="Search by title or description..." class="experiment-select">
+            </div>
+            
+            <div class="control-group">
+                <button id="applyFilters" class="btn btn-primary">Apply Filters</button>
+                <button id="clearFilters" class="btn btn-secondary">Clear</button>
+            </div>
+        </section>
+
+        <!-- Gallery Grid -->
+        <section class="gallery-grid" id="galleryGrid">
+            <!-- Snapshots will be populated here -->
+            <div class="empty-state">
+                <p>No snapshots yet. Create your first snapshot from the Exploration page!</p>
+            </div>
+        </section>
+{% endblock %}
+
+{% block extra_scripts %}
+    <!-- Snapshot Detail Modal -->
+    <div id="snapshotDetailModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeModal('snapshotDetailModal')">&times;</span>
+            <div id="snapshotDetailContent">
+                <!-- Populated by JavaScript -->
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/gallery.js"></script>
+{% endblock %}

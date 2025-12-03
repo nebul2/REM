@@ -1,0 +1,405 @@
+{
+  "dashboard": {
+    "title": "GOS Remote Energy Measurement (REM)",
+    "description": "Real-time power consumption monitoring from TP-Link Tapo P110 devices",
+    "tags": ["energy", "power", "gos", "tplink"],
+    "timezone": "browser",
+    "schemaVersion": 38,
+    "version": 1,
+    "refresh": "30s",
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "timepicker": {
+      "refresh_intervals": ["5s", "10s", "30s", "1m", "5m", "15m", "30m", "1h", "2h", "1d"]
+    },
+    "panels": [
+      {
+        "id": 1,
+        "title": "Summary - Total Power Consumption",
+        "type": "stat",
+        "gridPos": {
+          "h": 4,
+          "w": 12,
+          "x": 0,
+          "y": 0
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "InfluxDB"
+            },
+            "query": "from(bucket: \"rem\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"gos_rem\")\n  |> filter(fn: (r) => r._field == \"powerWatts\")\n  |> group()\n  |> mean()\n  |> group()\n  |> sum()",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "W",
+            "decimals": 1,
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": null, "color": "green"},
+                {"value": 1000, "color": "yellow"},
+                {"value": 5000, "color": "red"}
+              ]
+            }
+          }
+        },
+        "options": {
+          "graphMode": "none",
+          "colorMode": "value",
+          "orientation": "auto"
+        }
+      },
+      {
+        "id": 2,
+        "title": "Total Energy (kWh) - Last Hour",
+        "type": "stat",
+        "gridPos": {
+          "h": 4,
+          "w": 6,
+          "x": 12,
+          "y": 0
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "InfluxDB"
+            },
+            "query": "from(bucket: \"rem\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"gos_rem\")\n  |> filter(fn: (r) => r._field == \"powerWatts\")\n  |> group()\n  |> integral(unit: 1h)\n  |> map(fn: (r) => ({ r with _value: r._value / 1000.0 }))\n  |> group()\n  |> sum()",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "kWh",
+            "decimals": 2
+          }
+        },
+        "options": {
+          "graphMode": "none",
+          "colorMode": "value"
+        }
+      },
+      {
+        "id": 3,
+        "title": "Active Devices Count",
+        "type": "stat",
+        "gridPos": {
+          "h": 4,
+          "w": 6,
+          "x": 18,
+          "y": 0
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "InfluxDB"
+            },
+            "query": "from(bucket: \"rem\")\n  |> range(start: -5m)\n  |> filter(fn: (r) => r._measurement == \"gos_rem\")\n  |> filter(fn: (r) => r._field == \"powerWatts\")\n  |> group(columns: [\"alias\"])\n  |> last()\n  |> count()",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short"
+          }
+        },
+        "options": {
+          "graphMode": "none",
+          "colorMode": "value"
+        }
+      },
+      {
+        "id": 4,
+        "title": "Power Consumption by Device",
+        "type": "timeseries",
+        "gridPos": {
+          "h": 8,
+          "w": 24,
+          "x": 0,
+          "y": 4
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "InfluxDB"
+            },
+            "query": "from(bucket: \"rem\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"gos_rem\")\n  |> filter(fn: (r) => r._field == \"powerWatts\")\n  |> filter(fn: (r) => contains(value: r.alias, set: ${device_filter:json}))\n  |> aggregateWindow(every: ${interval:raw}, fn: mean, createEmpty: false)\n  |> yield(name: \"mean\")",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "W",
+            "decimals": 1,
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {
+              "axisLabel": "Power (W)",
+              "axisPlacement": "auto",
+              "drawStyle": "line",
+              "fillOpacity": 10,
+              "gradientMode": "none",
+              "lineInterpolation": "linear",
+              "lineWidth": 1,
+              "pointSize": 5,
+              "showPoints": "never",
+              "spanNulls": false
+            }
+          },
+          "overrides": []
+        },
+        "options": {
+          "tooltip": {
+            "mode": "multi"
+          },
+          "legend": {
+            "calcs": ["lastNotNull", "max", "mean"],
+            "displayMode": "table",
+            "placement": "bottom",
+            "showLegend": true
+          }
+        }
+      },
+      {
+        "id": 5,
+        "title": "Top Power Consumers",
+        "type": "bargauge",
+        "gridPos": {
+          "h": 10,
+          "w": 12,
+          "x": 0,
+          "y": 12
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "InfluxDB"
+            },
+            "query": "from(bucket: \"rem\")\n  |> range(start: -10m)\n  |> filter(fn: (r) => r._measurement == \"gos_rem\")\n  |> filter(fn: (r) => r._field == \"powerWatts\")\n  |> filter(fn: (r) => contains(value: r.alias, set: ${device_filter:json}))\n  |> group(columns: [\"alias\"])\n  |> mean()\n  |> sort(columns: [\"_value\"], desc: true)\n  |> limit(n: 10)",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "W",
+            "decimals": 1,
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": null, "color": "green"},
+                {"value": 50, "color": "yellow"},
+                {"value": 100, "color": "orange"},
+                {"value": 200, "color": "red"}
+              ]
+            },
+            "mappings": []
+          }
+        },
+        "options": {
+          "orientation": "horizontal",
+          "displayMode": "gradient",
+          "showUnfilled": true
+        }
+      },
+      {
+        "id": 6,
+        "title": "Energy Consumption Table",
+        "type": "table",
+        "gridPos": {
+          "h": 10,
+          "w": 12,
+          "x": 12,
+          "y": 12
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "InfluxDB"
+            },
+            "query": "from(bucket: \"rem\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"gos_rem\")\n  |> filter(fn: (r) => r._field == \"powerWatts\")\n  |> filter(fn: (r) => contains(value: r.alias, set: ${device_filter:json}))\n  |> group(columns: [\"alias\"])\n  |> aggregateWindow(every: 1m, fn: mean, createEmpty: false)\n  |> integral(unit: 1h)\n  |> map(fn: (r) => ({ r with _value: r._value / 1000.0, energy_kwh: r._value / 1000.0 }))\n  |> group()\n  |> keep(columns: [\"alias\", \"energy_kwh\"])\n  |> group(columns: [\"alias\"])\n  |> sum(column: \"energy_kwh\")",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "align": "auto",
+              "displayMode": "auto"
+            },
+            "mappings": []
+          },
+          "overrides": [
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "energy_kwh"
+              },
+              "properties": [
+                {
+                  "id": "unit",
+                  "value": "kWh"
+                },
+                {
+                  "id": "decimals",
+                  "value": 3
+                }
+              ]
+            }
+          ]
+        },
+        "options": {
+          "showHeader": true,
+          "sortBy": [
+            {
+              "displayName": "energy_kwh",
+              "desc": true
+            }
+          ]
+        }
+      },
+      {
+        "id": 7,
+        "title": "Power Heatmap by Device",
+        "type": "heatmap",
+        "gridPos": {
+          "h": 10,
+          "w": 24,
+          "x": 0,
+          "y": 22
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "influxdb",
+              "uid": "InfluxDB"
+            },
+            "query": "from(bucket: \"rem\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"gos_rem\")\n  |> filter(fn: (r) => r._field == \"powerWatts\")\n  |> filter(fn: (r) => contains(value: r.alias, set: ${device_filter:json}))\n  |> aggregateWindow(every: ${interval:raw}, fn: mean, createEmpty: false)\n  |> yield(name: \"mean\")",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "W",
+            "color": {
+              "mode": "spectrum"
+            }
+          }
+        },
+        "options": {
+          "calculate": false,
+          "cellGap": 2,
+          "cellValues": {
+            "unit": "short"
+          },
+          "color": {
+            "exponent": 0.5,
+            "fill": "dark-orange",
+            "mode": "spectrum",
+            "reverse": false,
+            "scale": "exponential",
+            "scheme": "Spectral",
+            "steps": 64
+          },
+          "exemplars": {
+            "color": "rgba(255,0,255,0.7)"
+          },
+          "filterValues": {
+            "le": 1e-9
+          },
+          "legend": {
+            "show": true
+          },
+          "rowsFrame": {
+            "layout": "auto"
+          },
+          "tooltip": {
+            "show": true,
+            "yHistogram": false
+          },
+          "yAxis": {
+            "axisPlacement": "left",
+            "reverse": false,
+            "unit": "short"
+          }
+        }
+      }
+    ],
+    "templating": {
+      "list": [
+        {
+          "name": "device_filter",
+          "type": "query",
+          "label": "Devices",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "InfluxDB"
+          },
+          "query": "from(bucket: \"rem\")\n  |> range(start: -1h)\n  |> filter(fn: (r) => r._measurement == \"gos_rem\")\n  |> keep(columns: [\"alias\"])\n  |> distinct(column: \"alias\")\n  |> sort()",
+          "current": {
+            "selected": false,
+            "text": "All",
+            "value": "$__all"
+          },
+          "options": [],
+          "multi": true,
+          "includeAll": true,
+          "allValue": null,
+          "refresh": 1,
+          "regex": "",
+          "skipUrlSync": false,
+          "sort": 1
+        },
+        {
+          "name": "interval",
+          "type": "interval",
+          "label": "Interval",
+          "current": {
+            "selected": true,
+            "text": "1m",
+            "value": "1m"
+          },
+          "options": [
+            {"text": "10s", "value": "10s", "selected": false},
+            {"text": "30s", "value": "30s", "selected": false},
+            {"text": "1m", "value": "1m", "selected": true},
+            {"text": "5m", "value": "5m", "selected": false},
+            {"text": "15m", "value": "15m", "selected": false},
+            {"text": "1h", "value": "1h", "selected": false}
+          ],
+          "query": "10s,30s,1m,5m,15m,1h",
+          "refresh": 1,
+          "skipUrlSync": false
+        }
+      ]
+    },
+    "annotations": {
+      "list": []
+    },
+    "editable": true,
+    "fiscalYearStartMonth": 0,
+    "graphTooltip": 1,
+    "links": [],
+    "liveNow": false,
+    "panels": [],
+    "weekStart": ""
+  }
+}
+

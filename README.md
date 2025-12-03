@@ -93,25 +93,26 @@ The Greening of Streaming (GOS) organization uses this system to:
 
 ---
 
-## Quick Start (Coming Soon)
+## Quick Start
+
+**👉 For the simplest deployment instructions, see [DEPLOYMENT_SIMPLE.md](DEPLOYMENT_SIMPLE.md)**
 
 ```bash
 # Clone repository
 git clone git@github.com:dom-robinson/stats.git
 cd stats
 
-# Configure
-cp .env.example .env
+# Configure (see DEPLOYMENT_SIMPLE.md for details)
+cp ENV_TEMPLATE .env
 # Edit .env with your credentials
 
-# Start services
+# Start everything
 docker-compose up -d
 
-# View logs
-docker-compose logs -f collector
-
-# Access Grafana
-open http://localhost:7003
+# Wait 30 seconds, then access:
+# - Admin UI: http://localhost:7001
+# - Grafana: http://localhost:7003
+# - InfluxDB: http://localhost:7002
 ```
 
 ---

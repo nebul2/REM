@@ -5,6 +5,7 @@
 
 # Data directories
 app/data/
+admin/data/
 *.db
 *.log
 
