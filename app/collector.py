@@ -9,6 +9,13 @@ import yaml
 import psycopg2
 from psycopg2.extras import execute_values
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
 CONF_FILE = os.getenv("CONF_FILE", "/app/config/config.yaml")
 
 #visit this in browser first to get the 'code'
@@ -77,41 +84,98 @@ def getDeviceIdList(accessToken):
 
 
 def getDevPower(deviceId, accessToken):
-    devPowerurl='https://aps1-openapi.tplinknbu.com/v1/device/deviceControl?client_id=fdcae128-0adf-4233-8a58-30760652bd16&api_key=e71bf02f-8b71-42ee-8af0-62a7bdf6c866&token=' + accessToken
-    getDevpowerlistdata={"method": "getDeviceRealTimeEnergy", "device": {"id": deviceId }}
-    session = requests.Session()
-    session.headers.update({'Content-Type': 'application/json'})
-    devPowerlist = session.post(devPowerurl, json=getDevpowerlistdata)
-    devPowerlistreturn=devPowerlist.json()['result']['powerWatts']
-
-    return devPowerlistreturn
+    """Get power reading from a device. Returns None on failure."""
+    try:
+        devPowerurl='https://aps1-openapi.tplinknbu.com/v1/device/deviceControl?client_id=fdcae128-0adf-4233-8a58-30760652bd16&api_key=e71bf02f-8b71-42ee-8af0-62a7bdf6c866&token=' + accessToken
+        getDevpowerlistdata={"method": "getDeviceRealTimeEnergy", "device": {"id": deviceId }}
+        session = requests.Session()
+        session.headers.update({'Content-Type': 'application/json'})
+        
+        # Add timeout to prevent hanging
+        devPowerlist = session.post(devPowerurl, json=getDevpowerlistdata, timeout=10)
+        
+        # Check if request was successful
+        devPowerlist.raise_for_status()
+        
+        response_json = devPowerlist.json()
+        
+        # Check if response has expected structure
+        if 'result' not in response_json or 'powerWatts' not in response_json.get('result', {}):
+            logger.warning(f"Unexpected API response structure for device {deviceId}: {response_json}")
+            return None
+        
+        power_watts = response_json['result']['powerWatts']
+        
+        # Validate the value is numeric
+        try:
+            power_float = float(power_watts)
+            # Reject negative values (power can't be negative)
+            if power_float < 0:
+                logger.warning(f"Invalid power reading for device {deviceId}: {power_float}W (negative)")
+                return None
+            return power_float
+        except (ValueError, TypeError):
+            logger.warning(f"Non-numeric power reading for device {deviceId}: {power_watts}")
+            return None
+            
+    except requests.exceptions.Timeout:
+        logger.error(f"Timeout reading device {deviceId} (API took >10s)")
+        return None
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Network error reading device {deviceId}: {e}")
+        return None
+    except KeyError as e:
+        logger.error(f"Missing key in API response for device {deviceId}: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"Unexpected error reading device {deviceId}: {e}", exc_info=True)
+        return None
 
 
 def getDevicePowerList(deviceIdList, accessToken, config, db_conn):
+    """Poll all devices and write valid readings to database. Skips failed devices."""
     devicePowerList = []
     points_buffer = []
+    failed_devices = []
     
     #walk through each device reading power
     for item in deviceIdList:
-        devPower = getDevPower(item['deviceId'], accessToken)
+        device_id = item['deviceId']
         alias = item['alias']
+        
+        devPower = getDevPower(device_id, accessToken)
+        
+        # Skip devices that failed to respond
+        if devPower is None:
+            failed_devices.append(alias)
+            continue
+        
         current_GMT = time.gmtime()
         timestamp = calendar.timegm(current_GMT)
         
-        # Store data point for batch insert
+        # Store data point for batch insert (only valid readings)
         points_buffer.append({
             'alias': alias,
             'power_watts': float(devPower),
             'time': timestamp
         })
     
-    # Batch insert all points to TimescaleDB
+    # Log summary of polling results
+    successful_count = len(points_buffer)
+    total_count = len(deviceIdList)
+    
+    if failed_devices:
+        logger.warning(f"Failed to read {len(failed_devices)} device(s): {', '.join(failed_devices)}")
+    
+    logger.info(f"Successfully read {successful_count}/{total_count} devices")
+    
+    # Batch insert all valid points to TimescaleDB
     if len(points_buffer) > 0:
         res = sendToTimescaleDB(db_conn, points_buffer)
         if not res:
-            print(f"Failed to send points to TimescaleDB")
+            logger.error(f"Failed to send {len(points_buffer)} points to TimescaleDB")
         else:
-            print(f"Wrote {len(points_buffer)} points to TimescaleDB")
+            logger.info(f"Wrote {len(points_buffer)} points to TimescaleDB")
     
     return devicePowerList
 

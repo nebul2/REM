@@ -284,23 +284,56 @@ def query_power_data(devices: List[str], start_time: str, end_time: str, interva
         cursor.close()
         conn.close()
         
-        # Organize by timestamp
-        all_timestamps = set()
+        # Generate all expected time buckets (even if empty) for forward-fill to work
+        from datetime import timedelta
+        import re
+        
+        # Parse interval to generate all expected buckets
+        interval_match = re.match(r'(\d+)([mhd])', interval.lower())
+        if interval_match:
+            num = int(interval_match.group(1))
+            unit = interval_match.group(2)
+            if unit == 'm':
+                bucket_delta = timedelta(minutes=num)
+            elif unit == 'h':
+                bucket_delta = timedelta(hours=num)
+            elif unit == 'd':
+                bucket_delta = timedelta(days=num)
+            else:
+                bucket_delta = timedelta(minutes=1)
+        else:
+            bucket_delta = timedelta(minutes=1)
+        
+        # Generate all expected time buckets from start to end
+        expected_timestamps = []
+        current_time = start_dt
+        while current_time <= end_dt:
+            # Round to bucket boundary (TimescaleDB does this automatically)
+            bucket_start = current_time.replace(second=0, microsecond=0)
+            expected_timestamps.append(bucket_start.isoformat())
+            current_time += bucket_delta
+        
+        # Organize existing data by timestamp
+        existing_by_timestamp = {}
         for device, points in device_data.items():
-            all_timestamps.update([p["timestamp"] for p in points])
+            for point in points:
+                ts = point["timestamp"]
+                if ts not in existing_by_timestamp:
+                    existing_by_timestamp[ts] = {}
+                existing_by_timestamp[ts][device] = point["value"]
         
-        all_timestamps = sorted(list(all_timestamps)) # Convert set to list for sorting
-        
-        for ts in all_timestamps:
+        # Create data points for ALL expected time buckets (including empty ones)
+        for ts in expected_timestamps:
             point = {"timestamp": ts}
+            # Add data for all devices (None if missing)
             for device in device_data.keys():
-                device_points = device_data[device]
-                matching = [p for p in device_points if p["timestamp"] == ts]
-                point[device] = matching[0]["value"] if matching else None
+                if ts in existing_by_timestamp and device in existing_by_timestamp[ts]:
+                    point[device] = existing_by_timestamp[ts][device]
+                else:
+                    point[device] = None
             
-            # Only add if there's at least one non-None value for a device
-            if any(v is not None for k, v in point.items() if k != "timestamp"):
-                data_points.append(point)
+            # Include ALL time buckets (even if empty) so forward-fill can work
+            data_points.append(point)
         
         return {
             "data": data_points,
@@ -618,38 +651,187 @@ async def get_experiments():
 @app.post("/api/experiments")
 async def create_experiment(
     name: str = Form(...),
-    devices: str = Form(...),
-    description: Optional[str] = Form(None)
+    description: Optional[str] = Form(None),
+    start_time: Optional[str] = Form(None),
+    end_time: Optional[str] = Form(None),
+    is_current: Optional[str] = Form(None),  # "true" if current experiment
+    linked_groups: Optional[str] = Form(None)  # Comma-separated group names
 ):
-    """Create a new experiment"""
+    """Create a new experiment with time range and linked groups"""
     experiments = load_experiments()
     
     if name in experiments:
         raise HTTPException(status_code=400, detail=f"Experiment '{name}' already exists")
     
-    device_list = [d.strip() for d in devices.split(',') if d.strip()]
-    if not device_list:
-        raise HTTPException(status_code=400, detail="At least one device is required")
+    # Parse linked groups
+    group_list = []
+    if linked_groups:
+        group_list = [g.strip() for g in linked_groups.split(',') if g.strip()]
     
-    experiments[name] = {
+    # Validate groups exist
+    groups_data = load_groups()
+    for group_name in group_list:
+        if group_name not in groups_data:
+            raise HTTPException(status_code=400, detail=f"Group '{group_name}' does not exist. Please create it first in Manage Groups.")
+    
+    # Handle current experiment
+    is_current_flag = is_current and is_current.lower() == "true"
+    
+    # If current experiment, start_time is required but end_time can be None
+    if is_current_flag:
+        if not start_time:
+            raise HTTPException(status_code=400, detail="Start time is required for current experiments")
+        end_time = None  # Will be set when experiment ends
+    else:
+        # For past experiments, validate time range if both provided
+        if start_time and end_time:
+            try:
+                start_dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+                end_dt = datetime.fromisoformat(end_time.replace('Z', '+00:00'))
+                if start_dt >= end_dt:
+                    raise HTTPException(status_code=400, detail="Start time must be before end time")
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=f"Invalid time format: {e}")
+    
+    experiment_id = name.lower().replace(' ', '-').replace('_', '-')
+    
+    experiments[experiment_id] = {
+        "id": experiment_id,
         "name": name,
-        "devices": device_list,
         "description": description or "",
-        "created_at": datetime.now().isoformat()
+        "time_range": {
+            "start": start_time or None,
+            "end": end_time or None
+        },
+        "is_current": is_current_flag,
+        "linked_groups": group_list,
+        "created_at": datetime.now().isoformat(),
+        "updated_at": datetime.now().isoformat()
     }
     
     save_experiments(experiments)
     
-    # Also save as group
-    groups = load_groups()
-    groups[name] = {
-        "name": name,
-        "devices": device_list,
-        "created_at": datetime.now().isoformat()
-    }
-    save_groups(groups)
+    return JSONResponse(content={"success": True, "experiment": experiments[experiment_id]})
+
+
+@app.put("/api/experiments/{experiment_id}")
+async def update_experiment(
+    experiment_id: str,
+    name: Optional[str] = Form(None),
+    description: Optional[str] = Form(None),
+    start_time: Optional[str] = Form(None),
+    end_time: Optional[str] = Form(None),
+    linked_groups: Optional[str] = Form(None)
+):
+    """Update an existing experiment"""
+    experiments = load_experiments()
     
-    return JSONResponse(content={"success": True, "experiment": experiments[name]})
+    if experiment_id not in experiments:
+        raise HTTPException(status_code=404, detail=f"Experiment '{experiment_id}' not found")
+    
+    experiment = experiments[experiment_id]
+    
+    # Update fields if provided
+    if name:
+        experiment["name"] = name
+    if description is not None:
+        experiment["description"] = description
+    
+    # Update time range if provided
+    if start_time is not None or end_time is not None:
+        if experiment.get("time_range") is None:
+            experiment["time_range"] = {}
+        if start_time is not None:
+            experiment["time_range"]["start"] = start_time or None
+        if end_time is not None:
+            experiment["time_range"]["end"] = end_time or None
+        
+        # Validate time range
+        if experiment["time_range"].get("start") and experiment["time_range"].get("end"):
+            try:
+                start_dt = datetime.fromisoformat(experiment["time_range"]["start"].replace('Z', '+00:00'))
+                end_dt = datetime.fromisoformat(experiment["time_range"]["end"].replace('Z', '+00:00'))
+                if start_dt >= end_dt:
+                    raise HTTPException(status_code=400, detail="Start time must be before end time")
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=f"Invalid time format: {e}")
+    
+    # Update linked groups if provided
+    if linked_groups is not None:
+        group_list = [g.strip() for g in linked_groups.split(',') if g.strip()] if linked_groups else []
+        
+        # Validate groups exist
+        groups = load_groups()
+        for group_name in group_list:
+            if group_name not in groups:
+                raise HTTPException(status_code=400, detail=f"Group '{group_name}' does not exist")
+        
+        experiment["linked_groups"] = group_list
+    
+    experiment["updated_at"] = datetime.now().isoformat()
+    
+    save_experiments(experiments)
+    
+    return JSONResponse(content={"success": True, "experiment": experiment})
+
+
+@app.delete("/api/experiments/{experiment_id}")
+async def delete_experiment(experiment_id: str):
+    """Delete an experiment"""
+    experiments = load_experiments()
+    
+    if experiment_id not in experiments:
+        raise HTTPException(status_code=404, detail=f"Experiment '{experiment_id}' not found")
+    
+    del experiments[experiment_id]
+    save_experiments(experiments)
+    
+    return JSONResponse(content={"success": True})
+
+
+@app.post("/api/experiments/{experiment_id}/start")
+async def start_experiment(experiment_id: str):
+    """Mark an experiment as current and set start time"""
+    experiments = load_experiments()
+    
+    if experiment_id not in experiments:
+        raise HTTPException(status_code=404, detail=f"Experiment '{experiment_id}' not found")
+    
+    experiment = experiments[experiment_id]
+    
+    # Set as current and update start time to now if not set
+    experiment["is_current"] = True
+    if not experiment.get("time_range", {}).get("start"):
+        experiment["time_range"] = experiment.get("time_range", {})
+        experiment["time_range"]["start"] = datetime.now().isoformat()
+    
+    experiment["updated_at"] = datetime.now().isoformat()
+    
+    save_experiments(experiments)
+    
+    return JSONResponse(content={"success": True, "experiment": experiment})
+
+
+@app.post("/api/experiments/{experiment_id}/end")
+async def end_experiment(experiment_id: str):
+    """End a current experiment by setting end time"""
+    experiments = load_experiments()
+    
+    if experiment_id not in experiments:
+        raise HTTPException(status_code=404, detail=f"Experiment '{experiment_id}' not found")
+    
+    experiment = experiments[experiment_id]
+    
+    # Set end time to now and mark as not current
+    experiment["is_current"] = False
+    experiment["time_range"] = experiment.get("time_range", {})
+    experiment["time_range"]["end"] = datetime.now().isoformat()
+    
+    experiment["updated_at"] = datetime.now().isoformat()
+    
+    save_experiments(experiments)
+    
+    return JSONResponse(content={"success": True, "experiment": experiment})
 
 
 # ============================================================================

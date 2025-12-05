@@ -8,7 +8,8 @@ let currentExperimentB = null;
 let currentTimeRange = '1h';
 let currentAggregation = '1m';
 let allDevices = [];
-let experiments = {};
+let groups = {}; // Device groups (participant groups)
+let experiments = {}; // Time-based experiments with ranges and group links
 let annotations = {};
 let annotationPopups = {}; // Track open annotation popups
 let showDevices = true;
@@ -70,18 +71,28 @@ async function loadInitialData() {
         allDevices = devicesData.devices || [];
         console.log(`Loaded ${allDevices.length} devices`);
         
-        // Load experiments (groups)
-        console.log('Loading groups/experiments...');
+        // Load groups (for linking to experiments)
+        console.log('Loading groups...');
         const groupsRes = await fetch('/api/groups');
         if (!groupsRes.ok) {
             throw new Error(`Failed to load groups: ${groupsRes.status}`);
         }
         const groupsData = await groupsRes.json();
-        experiments = groupsData.groups || {};
-        console.log(`Loaded ${Object.keys(experiments).length} experiments/groups:`, Object.keys(experiments));
+        groups = groupsData.groups || {};
+        console.log(`Loaded ${Object.keys(groups).length} groups:`, Object.keys(groups));
+        
+        // Load experiments (time-based studies with group links)
+        console.log('Loading experiments...');
+        const experimentsRes = await fetch('/api/experiments');
+        if (!experimentsRes.ok) {
+            throw new Error(`Failed to load experiments: ${experimentsRes.status}`);
+        }
+        const experimentsData = await experimentsRes.json();
+        experiments = experimentsData.experiments || {};
+        console.log(`Loaded ${Object.keys(experiments).length} experiments:`, Object.keys(experiments));
         
         populateExperimentSelects();
-        populateDeviceCheckboxes();
+        populateGroupCheckboxes();
         
         // Load annotations
         await loadAnnotations();
@@ -177,6 +188,7 @@ function setupEventListeners() {
     
     // Buttons
     document.getElementById('createExperimentBtn').addEventListener('click', () => {
+        populateGroupCheckboxes(); // Populate groups when opening modal
         openModal('createExperimentModal');
     });
     
@@ -185,6 +197,7 @@ function setupEventListeners() {
     });
     
     document.getElementById('saveSnapshotBtn').addEventListener('click', () => {
+        populateExperimentSelects(); // Ensure snapshot experiment select is populated
         openModal('saveSnapshotModal');
     });
     
@@ -218,45 +231,69 @@ function setupEventListeners() {
 function populateExperimentSelects() {
     const selectA = document.getElementById('experimentA');
     const selectB = document.getElementById('experimentB');
+    const snapshotSelect = document.getElementById('snapshotExperiment');
     
     // Clear options except first
     selectA.innerHTML = '<option value="">-- Select Experiment --</option>';
     selectB.innerHTML = '<option value="">-- Select Experiment --</option>';
+    if (snapshotSelect) {
+        snapshotSelect.innerHTML = '<option value="">-- Select Experiment --</option>';
+    }
     
-    for (const [name, exp] of Object.entries(experiments)) {
+    for (const [experimentId, exp] of Object.entries(experiments)) {
+        const displayName = exp.name || experimentId;
+        const timeRange = exp.time_range || {};
+        const startDate = timeRange.start ? new Date(timeRange.start).toLocaleDateString() : '';
+        const endDate = timeRange.end ? new Date(timeRange.end).toLocaleDateString() : '';
+        const dateRange = (startDate && endDate) ? ` (${startDate} - ${endDate})` : '';
+        
         const optionA = document.createElement('option');
-        optionA.value = name;
-        optionA.textContent = exp.name || name;
+        optionA.value = experimentId;
+        optionA.textContent = `${displayName}${dateRange}`;
         selectA.appendChild(optionA);
         
         const optionB = document.createElement('option');
-        optionB.value = name;
-        optionB.textContent = exp.name || name;
+        optionB.value = experimentId;
+        optionB.textContent = `${displayName}${dateRange}`;
         selectB.appendChild(optionB);
+        
+        if (snapshotSelect) {
+            const optionSnapshot = document.createElement('option');
+            optionSnapshot.value = experimentId;
+            optionSnapshot.textContent = `${displayName}${dateRange}`;
+            snapshotSelect.appendChild(optionSnapshot);
+        }
     }
 }
 
-// Populate device checkboxes
-function populateDeviceCheckboxes() {
-    const container = document.getElementById('experimentDevices');
+// Populate group checkboxes for experiment creation
+function populateGroupCheckboxes() {
+    const container = document.getElementById('experimentGroups');
+    if (!container) return; // Modal might not be loaded yet
+    
     container.innerHTML = '';
     
-    allDevices.forEach(device => {
+    for (const [groupName, groupData] of Object.entries(groups)) {
         const label = document.createElement('label');
         label.className = 'checkbox-label';
         
         const checkbox = document.createElement('input');
         checkbox.type = 'checkbox';
-        checkbox.name = 'devices';
-        checkbox.value = device;
+        checkbox.name = 'groups';
+        checkbox.value = groupName;
         
         const span = document.createElement('span');
-        span.textContent = device;
+        const deviceCount = (groupData.devices || []).length;
+        span.textContent = `${groupData.name || groupName} (${deviceCount} device${deviceCount !== 1 ? 's' : ''})`;
         
         label.appendChild(checkbox);
         label.appendChild(span);
         container.appendChild(label);
-    });
+    }
+    
+    if (Object.keys(groups).length === 0) {
+        container.innerHTML = '<p style="color: #666; font-size: 0.9rem;">No groups found. Please create groups first in "Manage Groups".</p>';
+    }
 }
 
 // Get curve configuration based on curve type
@@ -340,27 +377,62 @@ function getTimeRange() {
 }
 
 // Load experiment data
-async function loadExperimentData(side, experimentName) {
-    const experiment = experiments[experimentName];
-    if (!experiment || !experiment.devices || experiment.devices.length === 0) {
-        console.error('Invalid experiment:', experimentName);
+async function loadExperimentData(side, experimentId) {
+    const experiment = experiments[experimentId];
+    if (!experiment) {
+        console.error('Invalid experiment:', experimentId);
         return;
     }
     
-    const timeRange = getTimeRange();
+    // Get devices from linked groups
+    const experimentDevices = [];
+    const linkedGroups = experiment.linked_groups || [];
+    
+    for (const groupName of linkedGroups) {
+        const group = groups[groupName];
+        if (group && group.devices) {
+            experimentDevices.push(...group.devices);
+        }
+    }
+    
+    // Remove duplicates
+    const uniqueDevices = [...new Set(experimentDevices)];
+    
+    if (uniqueDevices.length === 0) {
+        alert(`Experiment "${experiment.name}" has no devices. Please link groups that contain devices.`);
+        return;
+    }
+    
+    // Use experiment's time range if defined, otherwise use current time range selector
+    let timeRange;
+    if (experiment.time_range && experiment.time_range.start && experiment.time_range.end) {
+        timeRange = {
+            start: experiment.time_range.start,
+            end: experiment.time_range.end
+        };
+    } else {
+        timeRange = getTimeRange();
+    }
     
     try {
-        const devicesParam = experiment.devices.join(',');
+        const devicesParam = uniqueDevices.join(',');
         const url = `/api/data/power?devices=${encodeURIComponent(devicesParam)}&start=${encodeURIComponent(timeRange.start)}&end=${encodeURIComponent(timeRange.end)}&interval=${currentAggregation}`;
         
         const response = await fetch(url);
         const result = await response.json();
         
         if (result.success && result.data) {
-            updateChart(side, result.data, result.devices, result.stats, experiment);
+            // Store experiment metadata with devices for later use
+            const experimentWithDevices = {
+                ...experiment,
+                devices: uniqueDevices,
+                linked_groups: linkedGroups
+            };
+            updateChart(side, result.data, uniqueDevices, result.stats, experimentWithDevices);
         }
     } catch (error) {
         console.error(`Error loading experiment ${side}:`, error);
+        alert(`Error loading experiment: ${error.message}`);
     }
 }
 
@@ -637,9 +709,31 @@ function updateChart(side, data, devices, stats, experiment) {
     
     // Total (sum of all devices)
     if (showTotal && data.length > 0) {
-        const totalData = data
+        // Forward-fill missing values: track last known value for each device
+        const lastKnownValues = {};
+        devices.forEach(dev => { lastKnownValues[dev] = null; });
+        
+        // First pass: forward-fill missing values
+        const filledData = data.map(point => {
+            const filledPoint = { ...point };
+            devices.forEach(dev => {
+                if (filledPoint[dev] !== null && filledPoint[dev] !== undefined && !isNaN(filledPoint[dev])) {
+                    // Update last known value
+                    lastKnownValues[dev] = filledPoint[dev];
+                } else if (lastKnownValues[dev] !== null) {
+                    // Forward-fill with last known value
+                    filledPoint[dev] = lastKnownValues[dev];
+                }
+            });
+            return filledPoint;
+        });
+        
+        const totalData = filledData
             .map(point => {
-                const sum = devices.reduce((acc, dev) => acc + (point[dev] || 0), 0);
+                const sum = devices.reduce((acc, dev) => {
+                    const val = point[dev];
+                    return acc + (val !== null && val !== undefined && !isNaN(val) ? val : 0);
+                }, 0);
                 return { x: point.timestamp, y: sum > 0 ? sum : null };
             })
             .filter(point => point.y !== null);
@@ -1154,9 +1248,28 @@ async function updateOverlayChart() {
     }
     
     if (showTotal && dataA.data.length > 0) {
-        const totalDataA = dataA.data
+        // Forward-fill missing values for Experiment A
+        const lastKnownValuesA = {};
+        devicesA.forEach(dev => { lastKnownValuesA[dev] = null; });
+        
+        const filledDataA = dataA.data.map(point => {
+            const filledPoint = { ...point };
+            devicesA.forEach(dev => {
+                if (filledPoint[dev] !== null && filledPoint[dev] !== undefined && !isNaN(filledPoint[dev])) {
+                    lastKnownValuesA[dev] = filledPoint[dev];
+                } else if (lastKnownValuesA[dev] !== null) {
+                    filledPoint[dev] = lastKnownValuesA[dev];
+                }
+            });
+            return filledPoint;
+        });
+        
+        const totalDataA = filledDataA
             .map(point => {
-                const sum = devicesA.reduce((acc, dev) => acc + (point[dev] || 0), 0);
+                const sum = devicesA.reduce((acc, dev) => {
+                    const val = point[dev];
+                    return acc + (val !== null && val !== undefined && !isNaN(val) ? val : 0);
+                }, 0);
                 return { x: point.timestamp, y: sum > 0 ? sum : null };
             })
             .filter(point => point.y !== null);
@@ -1169,9 +1282,28 @@ async function updateOverlayChart() {
             ...curveConfig
         });
         if (dataB && dataB.data.length > 0) {
-            const totalDataB = dataB.data
+            // Forward-fill missing values for Experiment B
+            const lastKnownValuesB = {};
+            devicesB.forEach(dev => { lastKnownValuesB[dev] = null; });
+            
+            const filledDataB = dataB.data.map(point => {
+                const filledPoint = { ...point };
+                devicesB.forEach(dev => {
+                    if (filledPoint[dev] !== null && filledPoint[dev] !== undefined && !isNaN(filledPoint[dev])) {
+                        lastKnownValuesB[dev] = filledPoint[dev];
+                    } else if (lastKnownValuesB[dev] !== null) {
+                        filledPoint[dev] = lastKnownValuesB[dev];
+                    }
+                });
+                return filledPoint;
+            });
+            
+            const totalDataB = filledDataB
                 .map(point => {
-                    const sum = devicesB.reduce((acc, dev) => acc + (point[dev] || 0), 0);
+                    const sum = devicesB.reduce((acc, dev) => {
+                        const val = point[dev];
+                        return acc + (val !== null && val !== undefined && !isNaN(val) ? val : 0);
+                    }, 0);
                     return { x: point.timestamp, y: sum > 0 ? sum : null };
                 })
                 .filter(point => point.y !== null);
@@ -1276,19 +1408,28 @@ async function createExperiment(event) {
     
     const name = document.getElementById('experimentName').value;
     const description = document.getElementById('experimentDescription').value;
-    const checkboxes = document.querySelectorAll('#experimentDevices input[type="checkbox"]:checked');
-    const devices = Array.from(checkboxes).map(cb => cb.value);
+    const startTime = document.getElementById('experimentStartTime').value;
+    const endTime = document.getElementById('experimentEndTime').value;
+    const checkboxes = document.querySelectorAll('#experimentGroups input[type="checkbox"]:checked');
+    const selectedGroups = Array.from(checkboxes).map(cb => cb.value);
     
-    if (devices.length === 0) {
-        alert('Please select at least one device');
+    if (selectedGroups.length === 0) {
+        alert('Please select at least one participant group');
+        return;
+    }
+    
+    if (!startTime || !endTime) {
+        alert('Please provide both start and end times');
         return;
     }
     
     try {
         const formData = new FormData();
         formData.append('name', name);
-        formData.append('devices', devices.join(','));
-        formData.append('description', description);
+        formData.append('description', description || '');
+        formData.append('start_time', new Date(startTime).toISOString());
+        formData.append('end_time', new Date(endTime).toISOString());
+        formData.append('linked_groups', selectedGroups.join(','));
         
         const response = await fetch('/api/experiments', {
             method: 'POST',
@@ -1297,15 +1438,17 @@ async function createExperiment(event) {
         
         if (response.ok) {
             const result = await response.json();
-            experiments[name] = result.experiment;
+            const experimentId = result.experiment.id;
+            experiments[experimentId] = result.experiment;
             populateExperimentSelects();
+            populateGroupCheckboxes(); // Refresh in case groups changed
             closeModal('createExperimentModal');
             document.getElementById('createExperimentForm').reset();
             
             // Select the new experiment
-            document.getElementById('experimentA').value = name;
-            currentExperimentA = name;
-            loadExperimentData('A', name);
+            document.getElementById('experimentA').value = experimentId;
+            currentExperimentA = experimentId;
+            loadExperimentData('A', experimentId);
         } else {
             const error = await response.json();
             alert(`Error: ${error.detail || 'Failed to create experiment'}`);
@@ -1381,15 +1524,34 @@ async function saveSnapshot(event) {
         chartImage = chartA.toBase64Image();
     }
     
-    // Get energy stats
+    // Get experiment
     const experiment = experiments[experimentId];
     if (!experiment) {
         alert('Invalid experiment selected');
         return;
     }
     
+    // Get devices from linked groups
+    const experimentDevices = [];
+    const linkedGroups = experiment.linked_groups || [];
+    
+    for (const groupName of linkedGroups) {
+        const group = groups[groupName];
+        if (group && group.devices) {
+            experimentDevices.push(...group.devices);
+        }
+    }
+    
+    // Remove duplicates
+    const uniqueDevices = [...new Set(experimentDevices)];
+    
+    if (uniqueDevices.length === 0) {
+        alert(`Experiment "${experiment.name}" has no devices. Please link groups that contain devices.`);
+        return;
+    }
+    
     try {
-        const devicesParam = experiment.devices.join(',');
+        const devicesParam = uniqueDevices.join(',');
         const url = `/api/data/power?devices=${encodeURIComponent(devicesParam)}&start=${encodeURIComponent(timeRange.start)}&end=${encodeURIComponent(timeRange.end)}&interval=${currentAggregation}`;
         
         const response = await fetch(url);
@@ -1399,7 +1561,7 @@ async function saveSnapshot(event) {
         formData.append('title', title);
         formData.append('experiment_id', experimentId);
         formData.append('experiment_name', experiment.name || experimentId);
-        formData.append('group_devices', experiment.devices.join(','));
+        formData.append('group_devices', uniqueDevices.join(','));
         formData.append('start_time', timeRange.start);
         formData.append('end_time', timeRange.end);
         formData.append('description', description);

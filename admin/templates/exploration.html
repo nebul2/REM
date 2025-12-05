@@ -17,23 +17,29 @@
         <!-- Controls Panel -->
         <section class="controls-panel">
             <div class="control-group">
-                <label>Experiment A:</label>
-                <select id="experimentA" class="experiment-select">
+                <label>Chart A:</label>
+                <select id="chartAExperiment" class="experiment-select">
                     <option value="">-- Select Experiment --</option>
                 </select>
-                <button id="createExperimentBtn" class="btn btn-secondary">Create New</button>
+                <select id="chartAGroups" class="experiment-select" style="display: none; margin-left: 10px;" multiple>
+                    <option value="">-- Select Groups --</option>
+                </select>
             </div>
             
             <div class="control-group">
-                <label>Experiment B:</label>
-                <select id="experimentB" class="experiment-select">
+                <label>Chart B:</label>
+                <select id="chartBExperiment" class="experiment-select">
                     <option value="">-- Select Experiment --</option>
+                </select>
+                <select id="chartBGroups" class="experiment-select" style="display: none; margin-left: 10px;" multiple>
+                    <option value="">-- Select Groups --</option>
                 </select>
             </div>
             
             <div class="control-group">
                 <label>Time Range:</label>
                 <select id="timeRange" class="time-range-select">
+                    <option value="experiment">Use Experiment Range</option>
                     <option value="15m">Last 15 minutes</option>
                     <option value="1h" selected>Last 1 hour</option>
                     <option value="6h">Last 6 hours</option>
@@ -58,14 +64,18 @@
                     <option value="1h">1 hour</option>
                 </select>
             </div>
+            
+            <div class="control-group">
+                <button id="createExperimentBtn" class="btn btn-secondary">Create Experiment</button>
+            </div>
         </section>
 
         <!-- Charts Section -->
         <section class="charts-section">
-            <!-- Experiment A Chart -->
+            <!-- Chart A -->
             <div class="chart-container" id="chartContainerA">
                 <div class="chart-header">
-                    <h2 id="chartATitle">Experiment A - Power Consumption</h2>
+                    <h2 id="chartATitle">Chart A - Power Consumption</h2>
                     <div class="chart-header-actions">
                         <div class="chart-stats" id="statsA">
                             <span class="stat-item">Total: <strong id="totalA">0</strong> kWh</span>
@@ -83,10 +93,10 @@
                 </div>
             </div>
             
-            <!-- Experiment B Chart -->
+            <!-- Chart B -->
             <div class="chart-container" id="chartContainerB" style="display: none;">
                 <div class="chart-header">
-                    <h2 id="chartBTitle">Experiment B - Power Consumption</h2>
+                    <h2 id="chartBTitle">Chart B - Power Consumption</h2>
                     <div class="chart-header-actions">
                         <div class="chart-stats" id="statsB">
                             <span class="stat-item">Total: <strong id="totalB">0</strong> kWh</span>
@@ -144,6 +154,12 @@
                 <button id="refreshBtn" class="btn btn-secondary">
                     🔄 Refresh Data
                 </button>
+                <button id="startExperimentBtn" class="btn btn-primary">
+                    ▶️ Start Experiment
+                </button>
+                <button id="endExperimentBtn" class="btn btn-secondary">
+                    ⏹️ End Experiment
+                </button>
                 <div class="curve-type-control">
                     <label>Curve Type:</label>
                     <select id="curveType" class="aggregation-select">
@@ -165,24 +181,48 @@
         <div class="modal-content">
             <span class="close" onclick="closeModal('createExperimentModal')">&times;</span>
             <h2>Create New Experiment</h2>
+            <p style="color: #666; font-size: 0.9rem; margin-bottom: 20px;">
+                Experiments are time-based studies that link to participant groups. Create groups first in "Manage Groups" if needed.
+            </p>
             <form id="createExperimentForm" onsubmit="createExperiment(event)">
                 <div class="form-group">
                     <label>Experiment Name:</label>
-                    <input type="text" id="experimentName" required placeholder="e.g., Experiment 1 - HLS Streaming">
+                    <input type="text" id="experimentName" required placeholder="e.g., HLS Streaming Test - Dec 2025">
                 </div>
                 <div class="form-group">
                     <label>Description:</label>
-                    <textarea id="experimentDescription" rows="3" placeholder="Optional description"></textarea>
+                    <textarea id="experimentDescription" rows="3" placeholder="Optional description of what this experiment is testing"></textarea>
                 </div>
                 <div class="form-group">
-                    <label>Select Devices:</label>
-                    <div class="device-checkboxes" id="experimentDevices">
+                    <label>Time Range:</label>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                        <div>
+                            <label style="font-size: 0.85rem; color: #666;">Start Time:</label>
+                            <input type="datetime-local" id="experimentStartTime" required>
+                        </div>
+                        <div>
+                            <label style="font-size: 0.85rem; color: #666;">End Time:</label>
+                            <input type="datetime-local" id="experimentEndTime">
+                        </div>
+                    </div>
+                    <div style="margin-top: 10px;">
+                        <label class="toggle-label" style="display: flex; align-items: center; gap: 10px;">
+                            <input type="checkbox" id="experimentIsCurrent">
+                            <span>Current Experiment (running now - end time will be set when you stop it)</span>
+                        </label>
+                    </div>
+                    <p style="font-size: 0.85rem; color: #666; margin-top: 5px;">
+                        For past experiments, set both start and end times. For current experiments, only set start time and check "Current Experiment".
+                    </p>
+                </div>
+                <div class="form-group">
+                    <label>Link Participant Groups:</label>
+                    <div class="device-checkboxes" id="experimentGroups">
                         <!-- Populated by JavaScript -->
                     </div>
-                    <div class="checkbox-actions">
-                        <button type="button" onclick="selectAllDevices()">Select All</button>
-                        <button type="button" onclick="deselectAllDevices()">Deselect All</button>
-                    </div>
+                    <p style="font-size: 0.85rem; color: #666; margin-top: 5px;">
+                        Select one or more groups that participate in this experiment (groups contain devices)
+                    </p>
                 </div>
                 <button type="submit" class="btn btn-primary">Create Experiment</button>
             </form>
