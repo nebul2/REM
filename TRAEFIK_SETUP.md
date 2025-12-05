@@ -1,81 +1,80 @@
-# Traefik Setup for stats.liveencode.com
+# Traefik Configuration Guide
 
-## Status
+This system can work in two modes:
 
-Traefik labels have been added to the admin service in `docker-compose.yml`. The service is configured to:
+## Mode 1: Standalone (Default)
 
-- Route `stats.liveencode.com` to the admin UI (port 7001)
-- Use basic authentication with users: `admin` and `gos`
-- Default password: `stats2024` (should be changed!)
+Works out of the box with just Docker Compose:
 
-## Traefik Configuration
-
-The admin service has these Traefik labels:
-
-```yaml
-labels:
-  - "traefik.enable=true"
-  - "traefik.http.routers.stats.rule=Host(`stats.liveencode.com`)"
-  - "traefik.http.routers.stats.entrypoints=web"
-  - "traefik.http.routers.stats.entrypoints=websecure"
-  - "traefik.http.routers.stats.tls.certresolver=letsencrypt"
-  - "traefik.http.services.stats.loadbalancer.server.port=7001"
-  - "traefik.http.routers.stats.middlewares=stats-auth"
-  - "traefik.http.middlewares.stats-auth.basicauth.usersfile=/etc/traefik/auth/users.txt"
-  - "traefik.docker.network=traefik-network"
-```
-
-## Authentication
-
-Users file is located at: `traefik-config/auth/users.txt`
-
-Current users:
-- `admin` - password: `stats2024`
-- `gos` - password: `stats2024`
-
-**⚠️ IMPORTANT: Change these passwords in production!**
-
-To change passwords:
 ```bash
-cd ~/stats
-htpasswd -b traefik-config/auth/users.txt admin <newpassword>
-htpasswd -b traefik-config/auth/users.txt gos <newpassword>
+docker-compose up -d
 ```
 
-## Traefik Network
+Services accessible directly via HTTP on Docker host ports:
+- `http://localhost:7001` - Admin UI
+- `http://localhost:7003` - Grafana
 
-The service connects to `traefik-network` which should be connected to your Traefik container.
+## Mode 2: Behind Traefik Reverse Proxy
 
-## If Traefik is Not Running
+For production deployments behind Traefik (like your staging environment):
 
-If you need to set up Traefik, it should:
-1. Be connected to the `traefik-network`
-2. Have access to `/var/run/docker.sock`
-3. Have the auth file mounted: `./traefik-config/auth/users.txt:/etc/traefik/auth/users.txt`
-4. Have port 80 and 443 exposed
+### Option A: Use Override File (Recommended)
 
-## Testing
+Create or use the provided override file:
 
-Once services are running:
+```bash
+docker-compose -f docker-compose.yml -f docker-compose.traefik.yml up -d
+```
 
-1. Check Traefik can see the service:
+This keeps the base `docker-compose.yml` clean and standalone, while the override adds Traefik configuration.
+
+### Option B: Uncomment Labels in docker-compose.yml
+
+If you prefer, you can uncomment the Traefik labels directly in `docker-compose.yml`:
+
+1. Uncomment the `traefik-network` in networks section
+2. Uncomment the labels section in the `admin` service
+3. Ensure `traefik-network` exists: `docker network create traefik-network` (if external)
+
+### Required Traefik Setup
+
+1. **Create external network** (if not already exists):
    ```bash
-   docker exec <traefik-container> cat /etc/traefik/traefik.yml
+   docker network create traefik-network
    ```
 
-2. Test the route:
-   ```bash
-   curl -u admin:stats2024 http://stats.liveencode.com
-   ```
+2. **Ensure Traefik can access the network**:
+   Your Traefik container needs to be on the `traefik-network` network.
 
-3. Check HTTPS (if SSL is configured):
-   ```bash
-   curl -u admin:stats2024 https://stats.liveencode.com
-   ```
+3. **Update labels** if needed:
+   - Change `Host(\`stats.liveencode.com\`)` to your domain
+   - Adjust middleware names if using different auth setup
+   - Update certificate resolver if using different SSL setup
 
-## Troubleshooting
+### Your Staging Environment
 
-- **Service not appearing in Traefik**: Check that Traefik is on the same network (`traefik-network`)
-- **Auth not working**: Verify the auth file path is correct in Traefik mount
-- **DNS not resolving**: Check DNS settings point `stats.liveencode.com` to Pi400's IP
+For your Pi400 staging environment with Traefik/Authelia:
 
+```bash
+# Make sure traefik-network exists
+docker network ls | grep traefik-network
+
+# If not, create it:
+docker network create traefik-network
+
+# Start with Traefik override
+docker-compose -f docker-compose.yml -f docker-compose.traefik.yml up -d
+```
+
+Or if you prefer, uncomment the Traefik sections in `docker-compose.yml` directly.
+
+### Verification
+
+After starting with Traefik:
+- Check container logs: `docker-compose logs admin`
+- Verify Traefik routing: Check Traefik dashboard
+- Access via your domain: `https://stats.liveencode.com`
+
+---
+
+**Note**: The base `docker-compose.yml` works standalone. Traefik configuration is optional and can be added via override file or by uncommenting the relevant sections.

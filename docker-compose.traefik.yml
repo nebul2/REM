@@ -1,0 +1,30 @@
+# Traefik-specific overrides for docker-compose.yml
+# Use this file to add Traefik configuration for reverse proxy setups
+#
+# Usage:
+#   docker-compose -f docker-compose.yml -f docker-compose.traefik.yml up -d
+#
+# This allows the base docker-compose.yml to work standalone,
+# while this override adds Traefik configuration when needed.
+
+version: '3.8'
+
+services:
+  admin:
+    networks:
+      - stats-network
+      - traefik-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.stats.rule=Host(`stats.liveencode.com`)"
+      - "traefik.http.routers.stats.entrypoints=websecure"
+      - "traefik.http.routers.stats.tls.certresolver=letsencrypt"
+      - "traefik.http.services.stats.loadbalancer.server.port=7001"
+      - "traefik.http.routers.stats.middlewares=stats-auth"
+      - "traefik.http.middlewares.stats-auth.basicauth.usersfile=/etc/traefik/auth/users.txt"
+      - "traefik.docker.network=traefik-network"
+
+networks:
+  traefik-network:
+    external: true
+
