@@ -29,11 +29,10 @@ TPLINK_CLIENT_ID=your-client-id-here
 TPLINK_CLIENT_SECRET=your-secret-here
 TPLINK_REFRESH_TOKEN=your-refresh-token-here
 
-# InfluxDB Setup (will auto-create if needed)
-INFLUXDB_ORG=GOS
-INFLUXDB_BUCKET=rem
-INFLUXDB_TOKEN=your-influxdb-token-here
-INFLUXDB_ADMIN_PASSWORD=your-secure-password-here
+# PostgreSQL/TimescaleDB Setup (will auto-create if needed)
+POSTGRES_DB=gos_rem
+POSTGRES_USER=gos
+POSTGRES_PASSWORD=your-secure-password-here
 
 # Grafana Setup
 GRAFANA_ADMIN_USER=admin
@@ -59,9 +58,9 @@ docker-compose up -d
 This will:
 - Download all required images
 - Start the data collector
-- Start InfluxDB database
-- Start Grafana dashboard
-- Start the Admin UI
+- Start TimescaleDB database (PostgreSQL with time-series extension)
+- Start Grafana dashboard (optional)
+- Start the Admin UI / Data Exploration Tool
 
 Wait about 30 seconds for everything to start, then check status:
 
@@ -73,9 +72,8 @@ All services should show "Up" status.
 
 ## Step 4: Access the System
 
-- **Admin UI / Data Exploration**: http://localhost:7001
-- **Grafana**: http://localhost:7003 (admin/admin or your credentials)
-- **InfluxDB**: http://localhost:7002 (for debugging only)
+- **Admin UI / Data Exploration Tool**: http://localhost:7001
+- **Grafana** (optional): http://localhost:7003 (admin/admin or your credentials)
 
 ## Step 5: View Data
 

@@ -113,16 +113,6 @@ services:
     restart: unless-stopped
     networks:
       - stats-network
-      - traefik-network
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.stats.rule=Host(`stats.liveencode.com`)"
-      - "traefik.http.routers.stats.entrypoints=websecure"
-      - "traefik.http.routers.stats.tls.certresolver=letsencrypt"
-      - "traefik.http.services.stats.loadbalancer.server.port=7001"
-      - "traefik.http.routers.stats.middlewares=stats-auth"
-      - "traefik.http.middlewares.stats-auth.basicauth.usersfile=/etc/traefik/auth/users.txt"
-      - "traefik.docker.network=traefik-network"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:7001/api/devices"]
       interval: 30s
@@ -142,5 +132,3 @@ volumes:
 networks:
   stats-network:
     driver: bridge
-  traefik-network:
-    external: true
