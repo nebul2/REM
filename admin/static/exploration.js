@@ -29,6 +29,12 @@ const deviceColors = [
     '#FF9F40', '#FF6384', '#C9CBCF', '#4BC0C0', '#FF6384'
 ];
 
+// Register Chart.js plugins
+if (typeof Chart !== 'undefined') {
+    // Zoom plugin auto-registers when loaded via CDN, but ensure it's available
+    console.log('Chart.js loaded, plugins available:', Object.keys(Chart.registry?.plugins || {}));
+}
+
 // Initialize
 document.addEventListener('DOMContentLoaded', async () => {
     console.log('Initializing GOS REM Exploration Tool...');
@@ -420,6 +426,38 @@ function initializeCharts() {
                 },
                 annotation: {
                     annotations: {}
+                },
+                zoom: {
+                    zoom: {
+                        wheel: {
+                            enabled: true,
+                        },
+                        pinch: {
+                            enabled: true
+                        },
+                        mode: 'x',
+                    },
+                    pan: {
+                        enabled: true,
+                        mode: 'x',
+                    },
+                    limits: {
+                        x: {min: 'original', max: 'original'}
+                    },
+                    onZoom: function({chart}) {
+                        if (chart === chartA && chartDataA) {
+                            updateStatsForVisibleRange(chartA, 'A', chartDataA.data, chartDataA.devices);
+                        } else if (chart === chartB && chartDataB) {
+                            updateStatsForVisibleRange(chartB, 'B', chartDataB.data, chartDataB.devices);
+                        }
+                    },
+                    onPan: function({chart}) {
+                        if (chart === chartA && chartDataA) {
+                            updateStatsForVisibleRange(chartA, 'A', chartDataA.data, chartDataA.devices);
+                        } else if (chart === chartB && chartDataB) {
+                            updateStatsForVisibleRange(chartB, 'B', chartDataB.data, chartDataB.devices);
+                        }
+                    }
                 }
             },
             scales: {

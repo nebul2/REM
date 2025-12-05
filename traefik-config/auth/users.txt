@@ -1,0 +1,2 @@
+admin:$apr1$A6DXGvKW$6ig5zjFjJP69bVQ8dx4tb1
+gos:$apr1$x31Dw.Fs$E8pwup3FUgcsKSJKGltxi/

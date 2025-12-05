@@ -47,5 +47,5 @@
         </div>
     </div>
 
-    <script src="/static/gallery.js"></script>
+    {% if gallery_js %}<script>{{ gallery_js | safe }}</script>{% endif %}
 {% endblock %}

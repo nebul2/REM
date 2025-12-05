@@ -4,16 +4,16 @@ poller:
   # Interval in seconds between polls (can be overridden by POLL_INTERVAL env var)
   interval: 30
 
-# InfluxDB configuration
+# PostgreSQL/TimescaleDB configuration
 # Values can be overridden by environment variables:
-# - INFLUXDB_URL
-# - INFLUXDB_ORG
-# - INFLUXDB_BUCKET
-# - INFLUXDB_TOKEN
-influxdb:
-  - name: "local"
-    url: "http://influxdb:8086"
-    org: "GOS"
-    bucket: "rem"
-    # Token should come from environment variable INFLUXDB_TOKEN
-
+# - POSTGRES_HOST
+# - POSTGRES_PORT
+# - POSTGRES_DB
+# - POSTGRES_USER
+# - POSTGRES_PASSWORD
+postgresql:
+  host: "timescaledb"
+  port: 5432
+  database: "gos_rem"
+  user: "gos"
+  # Password should come from environment variable POSTGRES_PASSWORD

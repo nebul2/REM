@@ -1,8 +1,8 @@
 # GOS Remote Energy Measurement (REM) System
 
-**Status**: 🚧 Under Development - Migrating from Pi400 to containerized deployment
+**Status**: ✅ **Operational** - Fully containerized and deployed
 
-A Docker-based system for collecting real-time power consumption data from TP-Link Tapo P110 smart plugs distributed globally, storing in InfluxDB, and visualizing through Grafana dashboards.
+A Docker-based system for collecting real-time power consumption data from TP-Link Tapo P110 smart plugs distributed globally, storing in TimescaleDB, and exploring through the GOS REM Data Exploration Tool.
 
 ---
 
@@ -19,9 +19,9 @@ A Docker-based system for collecting real-time power consumption data from TP-Li
 The Greening of Streaming (GOS) organization uses this system to:
 
 1. **Collect** real-time power measurements from Tapo P110 wireless smart plugs
-2. **Store** time-series data in InfluxDB
-3. **Visualize** power consumption in Grafana dashboards
-4. **Analyze** energy usage during streaming experiments
+2. **Store** time-series data in TimescaleDB (PostgreSQL extension)
+3. **Explore** data through the interactive GOS REM Data Exploration Tool
+4. **Analyze** energy usage during streaming experiments with advanced filtering, grouping, and statistical analysis
 
 ### Use Cases
 - **Remote Energy Measurement (REM)**: Monitor power consumption of computers/equipment globally
@@ -33,26 +33,22 @@ The Greening of Streaming (GOS) organization uses this system to:
 
 ## Project Status
 
-### Current State (Pi400)
-- ✅ Running on Raspberry Pi 400
-- ✅ InfluxDB + Grafana operational
-- ✅ Python collector working
-- ⚠️ Multiple zombie processes (needs cleanup)
-- ⚠️ Hard-coded paths (not portable)
+### Current State
+- ✅ **Fully Containerized**: Docker Compose stack running on Pi400
+- ✅ **TimescaleDB**: PostgreSQL-based time-series database
+- ✅ **Data Collector**: Polling TP-Link API every 30 seconds
+- ✅ **GOS REM Data Exploration Tool**: Interactive web UI for data analysis
+- ✅ **Collector Control**: Web-based start/stop/pause and polling interval control
+- ✅ **Experiment Management**: Device grouping and A/B testing support
+- ✅ **Snapshot Gallery**: Save and archive chart snapshots with annotations
 
-### Migration Goals
-- 🎯 **Containerized**: Docker Compose stack
-- 🎯 **Portable**: Deploy anywhere (Linode, AWS, GCP, etc.)
-- 🎯 **Configurable**: Easy to adjust polling, add devices
-- 🎯 **Maintainable**: Admin interface for start/stop/pause
-- 🎯 **Scalable**: Support growing device count
-
-### Development Progress
-- [x] Phase 1: Assessment & Planning
-- [ ] Phase 2: Core Containerization
-- [ ] Phase 3: Enhanced Features
-- [ ] Phase 4: Admin Interface
-- [ ] Phase 5: Cloud Deployment
+### Key Features
+- 📊 **Interactive Charts**: Overlay multiple experiments, toggle device visibility, statistical overlays
+- 🔬 **Experiment Groups**: Create device groups for A/B testing and comparisons
+- 📈 **Statistical Analysis**: Mean, median, total, and average calculations with legend-based filtering
+- 📸 **Snapshot Archive**: Save chart snapshots with annotations for future reference
+- ⏱️ **Dynamic Time Ranges**: Zoom, pan, and select time ranges for detailed analysis
+- 🎨 **GoS Branding**: Consistent branding with Greening of Streaming logo and colors
 
 ---
 
@@ -63,11 +59,17 @@ The Greening of Streaming (GOS) organization uses this system to:
 │                    Docker Compose Stack                      │
 ├─────────────────────────────────────────────────────────────┤
 │                                                               │
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────┐ │
-│  │  Data Collector │  │   InfluxDB 2.x  │  │  Grafana    │ │
-│  │   (Python)      │──│   (Database)    │──│ (Dashboard) │ │
-│  └─────────────────┘  └─────────────────┘  └─────────────┘ │
-│                                                               │
+│  ┌─────────────────┐  ┌──────────────────┐  ┌──────────────┐ │
+│  │  Data Collector │  │   TimescaleDB    │  │  Admin UI    │ │
+│  │   (Python)      │──│  (PostgreSQL)    │──│ (FastAPI)    │ │
+│  └─────────────────┘  └──────────────────┘  └──────────────┘ │
+│                                │                              │
+│                                └──────────────┬───────────────┘
+│                                               │
+│                                    ┌──────────────────┐
+│                                    │  Data Exploration│
+│                                    │      Tool        │
+│                                    └──────────────────┘
 └───────────────────────────────┬───────────────────────────────┘
                                 │
                     ┌───────────────────────┐
@@ -77,10 +79,10 @@ The Greening of Streaming (GOS) organization uses this system to:
 ```
 
 ### Components
-1. **Python Data Collector**: Polls TP-Link Cloud API, collects power readings
-2. **InfluxDB 2.x**: Time-series database for storing measurements
-3. **Grafana**: Dashboard for visualization and analysis
-4. **Admin UI** (planned): Web interface for system management
+1. **Python Data Collector**: Polls TP-Link Cloud API, collects power readings from all P110 devices
+2. **TimescaleDB**: PostgreSQL-based time-series database for storing measurements
+3. **Admin UI (FastAPI)**: Web interface for system management and data exploration
+4. **GOS REM Data Exploration Tool**: Interactive charts, experiment grouping, snapshot gallery
 
 ---
 
@@ -110,9 +112,9 @@ cp ENV_TEMPLATE .env
 docker-compose up -d
 
 # Wait 30 seconds, then access:
-# - Admin UI: http://localhost:7001
-# - Grafana: http://localhost:7003
-# - InfluxDB: http://localhost:7002
+# - Data Exploration Tool: http://localhost:7001
+# - Manage Groups: http://localhost:7001/manage
+# - Snapshot Gallery: http://localhost:7001/gallery
 ```
 
 ---
@@ -126,15 +128,15 @@ TPLINK_CLIENT_ID=your-client-id
 TPLINK_CLIENT_SECRET=your-secret
 TPLINK_REFRESH_TOKEN=initial-token
 
-# InfluxDB
-INFLUXDB_URL=http://influxdb:8086
-INFLUXDB_ORG=GOS
-INFLUXDB_BUCKET=rem
-INFLUXDB_TOKEN=your-token
+# PostgreSQL/TimescaleDB
+POSTGRES_HOST=timescaledb
+POSTGRES_PORT=5432
+POSTGRES_DB=gos_rem
+POSTGRES_USER=gos
+POSTGRES_PASSWORD=your-secure-password
 
 # Collector
-POLL_INTERVAL=30  # seconds
-PERSIST_MODE=true
+POLL_INTERVAL=30  # seconds (configurable via UI)
 LOG_LEVEL=INFO
 ```
 
@@ -147,35 +149,42 @@ LOG_LEVEL=INFO
 
 ## Data Model
 
-### InfluxDB Schema
-```
-Measurement: gos_rem
-Tags:
-  - alias: Device location/name
-Fields:
-  - powerWatts: Current power consumption (float)
-Timestamp: Nanosecond precision
+### TimescaleDB Schema
+```sql
+CREATE TABLE gos_rem (
+    time TIMESTAMPTZ NOT NULL,
+    alias TEXT NOT NULL,
+    power_watts FLOAT NOT NULL
+);
+
+SELECT create_hypertable('gos_rem', 'time');
 ```
 
-### Example Query (Flux)
-```flux
-from(bucket: "rem")
-  |> range(start: -1h)
-  |> filter(fn: (r) => r._measurement == "gos_rem")
-  |> filter(fn: (r) => r.alias == "London-Office-PC")
+### Example Query (SQL)
+```sql
+SELECT time_bucket('1 minute', time) AS time,
+       alias,
+       AVG(power_watts) AS avg_power
+FROM gos_rem
+WHERE time > NOW() - INTERVAL '1 hour'
+  AND alias = 'London-Office-PC'
+GROUP BY time_bucket('1 minute', time), alias
+ORDER BY time;
 ```
 
 ---
 
-## Grafana Dashboards (Planned)
+## GOS REM Data Exploration Tool
 
 ### Features
-- **Device Filtering**: Multi-select specific devices
-- **Time Range**: Compare different time periods
-- **Energy Totals**: Calculate kWh consumed
-- **Real-time Updates**: Live data streaming
-- **Cost Estimation**: Based on configurable rates
-- **Experiment Mode**: Tag and compare experiment runs
+- **Interactive Charts**: Overlay multiple experiments with smooth curves and zoom/pan
+- **Device Grouping**: Create experiment groups (A/B testing support)
+- **Statistical Analysis**: Mean, median, total, and average with dynamic recalculation
+- **Legend-based Filtering**: Show/hide devices and recalculate statistics
+- **Time Range Selection**: Zoom and pan to focus on specific time periods
+- **Annotation System**: Add timeline markers with notes
+- **Snapshot Gallery**: Save, archive, and search historical charts
+- **Collector Control**: Start/stop polling and adjust polling frequency via UI
 
 ---
 
@@ -183,10 +192,9 @@ from(bucket: "rem")
 
 ### Local Development
 ```bash
-# DevBench ports
-7001: Admin UI
-7002: InfluxDB
-7003: Grafana
+# Default ports
+7001: Admin UI / Data Exploration Tool
+5432: TimescaleDB (PostgreSQL)
 ```
 
 ### Akamai Linode (Production)
@@ -195,11 +203,11 @@ from(bucket: "rem")
 - **Access**: HTTPS with Let's Encrypt SSL
 - **Backup**: Daily automated backups
 
-### Alternative: Google Cloud Run
-Similar to RAMS/Meetex architecture:
-- Cloud Run for collector (scheduled)
-- Cloud SQL or InfluxDB Cloud
-- Grafana Cloud (free tier)
+### Production Deployment (Pi400)
+- **Status**: ✅ Currently running on Raspberry Pi 400
+- **URL**: https://stats.liveencode.com
+- **Access**: Protected by Authelia authentication
+- **Services**: All services running in Docker containers
 
 ---
 
@@ -220,21 +228,22 @@ Similar to RAMS/Meetex architecture:
 
 ## Development
 
-### Project Structure (Planned)
+### Project Structure
 ```
 stats/
 ├── app/
-│   ├── collector.py       # Main data collector
-│   ├── config.py          # Configuration management
-│   ├── tplink_api.py      # TP-Link API client
-│   └── influx_writer.py   # InfluxDB writer
-├── admin/                 # Admin web UI
-├── grafana/
-│   └── dashboards/        # Dashboard definitions
-├── docker-compose.yml
-├── Dockerfile
-├── requirements.txt
-└── config.example.yaml
+│   ├── collector.py       # Main data collector (polls TP-Link API)
+│   ├── config/            # Configuration files
+│   └── Dockerfile         # Collector container
+├── admin/                 # Admin web UI and Data Exploration Tool
+│   ├── app.py            # FastAPI backend
+│   ├── templates/        # HTML templates
+│   ├── static/           # CSS, JavaScript, images
+│   └── Dockerfile        # Admin UI container
+├── scripts/              # Database initialization scripts
+├── docker-compose.yml    # Full stack orchestration
+├── ENV_TEMPLATE          # Environment variables template
+└── README.md
 ```
 
 ### Running Tests
@@ -291,14 +300,14 @@ docker-compose logs collector
 # - API rate limit
 ```
 
-### No Data in Grafana
+### No Data in Charts
 ```bash
 # Check collector is writing
 docker-compose logs collector | grep "Wrote"
 
-# Check InfluxDB
-docker exec stats-influxdb influx query \
-  'from(bucket:"rem") |> range(start:-1h) |> count()'
+# Check TimescaleDB
+docker exec stats-timescaledb psql -U gos -d gos_rem -c \
+  "SELECT COUNT(*), MAX(time) FROM gos_rem WHERE time > NOW() - INTERVAL '1 hour';"
 ```
 
 ### Token Refresh Failed
@@ -422,8 +431,8 @@ TBD - To be determined with GOS team
 
 ---
 
-**Last Updated**: 2025-12-02  
-**Version**: 0.1.0-alpha  
-**Status**: Under Active Development
+**Last Updated**: 2025-12-05  
+**Version**: 1.0.0  
+**Status**: Operational and Deployed
 
 

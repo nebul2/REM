@@ -1,6 +1,29 @@
 version: '3.8'
 
 services:
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: stats-timescaledb
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-gos_rem}
+      POSTGRES_USER: ${POSTGRES_USER:-gos}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-in-production}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - timescaledb-data:/var/lib/postgresql/data
+      - ./scripts/init-timescaledb.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    restart: unless-stopped
+    networks:
+      - stats-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-gos} -d ${POSTGRES_DB:-gos_rem}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
   collector:
     build:
       context: ./app
@@ -12,11 +35,12 @@ services:
       - TPLINK_CLIENT_SECRET=${TPLINK_CLIENT_SECRET}
       - TPLINK_API_KEY=${TPLINK_API_KEY:-e71bf02f-8b71-42ee-8af0-62a7bdf6c866}
       - TPLINK_REFRESH_TOKEN=${TPLINK_REFRESH_TOKEN}
-      # InfluxDB connection
-      - INFLUXDB_URL=http://influxdb:8086
-      - INFLUXDB_ORG=${INFLUXDB_ORG:-GOS}
-      - INFLUXDB_BUCKET=${INFLUXDB_BUCKET:-rem}
-      - INFLUXDB_TOKEN=${INFLUXDB_TOKEN}
+      # PostgreSQL/TimescaleDB connection
+      - POSTGRES_HOST=timescaledb
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=${POSTGRES_DB:-gos_rem}
+      - POSTGRES_USER=${POSTGRES_USER:-gos}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-change-me-in-production}
       # Collector settings
       - POLL_INTERVAL=${POLL_INTERVAL:-30}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
@@ -26,7 +50,8 @@ services:
       - ./app/config:/app/config:ro
       - collector-data:/app/data
     depends_on:
-      - influxdb
+      timescaledb:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - stats-network
@@ -36,30 +61,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 10s
-
-  influxdb:
-    image: influxdb:2.7-alpine
-    container_name: stats-influxdb
-    environment:
-      - DOCKER_INFLUXDB_INIT_MODE=setup
-      - DOCKER_INFLUXDB_INIT_USERNAME=${INFLUXDB_ADMIN_USER:-admin}
-      - DOCKER_INFLUXDB_INIT_PASSWORD=${INFLUXDB_ADMIN_PASSWORD:-change-me-in-production}
-      - DOCKER_INFLUXDB_INIT_ORG=${INFLUXDB_ORG:-GOS}
-      - DOCKER_INFLUXDB_INIT_BUCKET=${INFLUXDB_BUCKET:-rem}
-      - DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=${INFLUXDB_TOKEN}
-      - DOCKER_INFLUXDB_INIT_RETENTION=90d
-    volumes:
-      - influxdb-data:/var/lib/influxdb2
-    ports:
-      - "${INFLUXDB_PORT:-7002}:8086"
-    restart: unless-stopped
-    networks:
-      - stats-network
-    healthcheck:
-      test: ["CMD", "influx", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
 
   grafana:
     image: grafana/grafana:10.4.2
@@ -76,8 +77,10 @@ services:
     ports:
       - "${GRAFANA_PORT:-7003}:3000"
     depends_on:
-      - influxdb
-      - admin
+      timescaledb:
+        condition: service_healthy
+      admin:
+        condition: service_started
     restart: unless-stopped
     networks:
       - stats-network
@@ -93,20 +96,33 @@ services:
       dockerfile: Dockerfile
     container_name: stats-admin
     environment:
-      - INFLUXDB_URL=http://influxdb:8086
-      - INFLUXDB_ORG=${INFLUXDB_ORG:-GOS}
-      - INFLUXDB_BUCKET=${INFLUXDB_BUCKET:-rem}
-      - INFLUXDB_TOKEN=${INFLUXDB_TOKEN}
+      # PostgreSQL/TimescaleDB connection
+      - POSTGRES_HOST=timescaledb
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=${POSTGRES_DB:-gos_rem}
+      - POSTGRES_USER=${POSTGRES_USER:-gos}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-change-me-in-production}
       - DATA_DIR=/app/data
     volumes:
       - admin-data:/app/data
     ports:
       - "${ADMIN_PORT:-7001}:7001"
     depends_on:
-      - influxdb
+      timescaledb:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - stats-network
+      - traefik-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.stats.rule=Host(`stats.liveencode.com`)"
+      - "traefik.http.routers.stats.entrypoints=websecure"
+      - "traefik.http.routers.stats.tls.certresolver=letsencrypt"
+      - "traefik.http.services.stats.loadbalancer.server.port=7001"
+      - "traefik.http.routers.stats.middlewares=stats-auth"
+      - "traefik.http.middlewares.stats-auth.basicauth.usersfile=/etc/traefik/auth/users.txt"
+      - "traefik.docker.network=traefik-network"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:7001/api/devices"]
       interval: 30s
@@ -116,7 +132,7 @@ services:
 volumes:
   collector-data:
     driver: local
-  influxdb-data:
+  timescaledb-data:
     driver: local
   grafana-data:
     driver: local
@@ -126,4 +142,5 @@ volumes:
 networks:
   stats-network:
     driver: bridge
-
+  traefik-network:
+    external: true

@@ -4,8 +4,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}GOS REM - Data Exploration{% endblock %}</title>
-    <link rel="stylesheet" href="/static/exploration.css">
-    <link rel="icon" href="/static/gos-logo.png" type="image/png">
+    <style>{{ css_content | safe }}</style>
+    {% if logo_data_uri %}<link rel="icon" href="{{ logo_data_uri }}" type="image/png">{% endif %}
+    <script>
+        // Redirect to Authelia if we get 401
+        if (document.body && document.body.textContent && document.body.textContent.trim() === "401 Unauthorized") {
+            window.location.href = "https://auth.liveencode.com/?rd=" + encodeURIComponent(window.location.href);
+        }
+    </script>
     {% block extra_head %}{% endblock %}
 </head>
 <body>
@@ -14,7 +20,9 @@
         <div class="header-content">
             <div class="logo-section">
                 <div class="gos-logo">
-                    <img src="/static/gos-logo.png" alt="GoS Logo" style="height: 50px; width: auto;">
+                    {% if logo_data_uri %}
+                    <img src="{{ logo_data_uri }}" alt="GoS Logo" style="height: 50px; width: auto;">
+                    {% endif %}
                 </div>
                 <div class="header-text">
                     <h1>GOS Remote Energy Measurement</h1>
@@ -22,9 +30,9 @@
                 </div>
             </div>
             <nav class="header-nav">
-                <a href="/" class="nav-link {% block nav_exploration_active %}{% endblock %}">Exploration</a>
-                <a href="/manage" class="nav-link {% block nav_manage_active %}{% endblock %}">Manage Groups</a>
-                <a href="/gallery" class="nav-link {% block nav_gallery_active %}{% endblock %}">Gallery</a>
+                <a href="{{ base_url }}/exploration" class="nav-link {% block nav_exploration_active %}{% endblock %}">Exploration</a>
+                <a href="{{ base_url }}/manage" class="nav-link {% block nav_manage_active %}{% endblock %}">Manage Groups</a>
+                <a href="{{ base_url }}/gallery" class="nav-link {% block nav_gallery_active %}{% endblock %}">Gallery</a>
             </nav>
         </div>
     </header>

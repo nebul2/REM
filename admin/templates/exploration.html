@@ -291,5 +291,5 @@
             </details>
         </section>
 
-    <script src="/static/exploration.js"></script>
+    {% if exploration_js %}<script>{{ exploration_js | safe }}</script>{% endif %}
 {% endblock %}

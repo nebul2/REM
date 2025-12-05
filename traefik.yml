@@ -1,0 +1,37 @@
+# Traefik configuration for stats.liveencode.com
+version: '3.8'
+
+services:
+  traefik:
+    image: traefik:v2.11
+    container_name: stats-traefik
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik-config:/etc/traefik
+      - ./traefik-config/auth:/etc/traefik/auth
+    networks:
+      - stats-network
+    labels:
+      - "traefik.enable=true"
+    command:
+      - --api.dashboard=false
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      - --certificatesresolvers.letsencrypt.acme.email=d2@d2consulting.co.uk
+      - --certificatesresolvers.letsencrypt.acme.storage=/etc/traefik/acme.json
+      - --certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik-config/acme.json:/etc/traefik/acme.json
+      - ./traefik-config/auth:/etc/traefik/auth
+
+networks:
+  stats-network:
+    external: true
+
