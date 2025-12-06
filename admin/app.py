@@ -22,6 +22,16 @@ import base64
 
 app = FastAPI(title="GOS REM Data Exploration Tool", root_path="")
 
+# Add CORS middleware to allow healthcheck from dashboard
+from fastapi.middleware.cors import CORSMiddleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allow all origins for healthcheck
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # Templates and static files
 templates_dir = Path(__file__).parent / "templates"
 static_dir = Path(__file__).parent / "static"
