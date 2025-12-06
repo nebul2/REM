@@ -14,63 +14,7 @@
 {% endblock %}
 
 {% block content %}
-        <!-- Controls Panel -->
-        <section class="controls-panel">
-            <div class="control-group">
-                <label>Chart A:</label>
-                <select id="chartAExperiment" class="experiment-select">
-                    <option value="">-- Select Experiment --</option>
-                </select>
-                <select id="chartAGroups" class="experiment-select" style="display: none; margin-left: 10px;" multiple>
-                    <option value="">-- Select Groups --</option>
-                </select>
-            </div>
-            
-            <div class="control-group">
-                <label>Chart B:</label>
-                <select id="chartBExperiment" class="experiment-select">
-                    <option value="">-- Select Experiment --</option>
-                </select>
-                <select id="chartBGroups" class="experiment-select" style="display: none; margin-left: 10px;" multiple>
-                    <option value="">-- Select Groups --</option>
-                </select>
-            </div>
-            
-            <div class="control-group">
-                <label>Time Range:</label>
-                <select id="timeRange" class="time-range-select">
-                    <option value="experiment">Use Experiment Range</option>
-                    <option value="15m">Last 15 minutes</option>
-                    <option value="1h" selected>Last 1 hour</option>
-                    <option value="6h">Last 6 hours</option>
-                    <option value="24h">Last 24 hours</option>
-                    <option value="custom">Custom Range</option>
-                </select>
-                <div id="customRange" class="custom-range" style="display: none;">
-                    <input type="datetime-local" id="startTime">
-                    <input type="datetime-local" id="endTime">
-                    <button id="applyCustomRange" class="btn btn-primary">Apply</button>
-                </div>
-            </div>
-            
-            <div class="control-group">
-                <label>Aggregation:</label>
-                <select id="aggregation" class="aggregation-select">
-                    <option value="10s">10 seconds</option>
-                    <option value="30s">30 seconds</option>
-                    <option value="1m" selected>1 minute</option>
-                    <option value="5m">5 minutes</option>
-                    <option value="15m">15 minutes</option>
-                    <option value="1h">1 hour</option>
-                </select>
-            </div>
-            
-            <div class="control-group">
-                <button id="createExperimentBtn" class="btn btn-secondary">Create Experiment</button>
-            </div>
-        </section>
-
-        <!-- Charts Section -->
+        <!-- Charts Section - AT THE TOP -->
         <section class="charts-section">
             <!-- Chart A -->
             <div class="chart-container" id="chartContainerA">
@@ -115,7 +59,60 @@
             </div>
         </section>
 
-        <!-- Controls -->
+        <!-- Compact Controls Panel - BELOW CHARTS -->
+        <section class="controls-panel compact-controls">
+            <div class="control-group compact-group">
+                <label>Chart A:</label>
+                <select id="chartAExperiment" class="experiment-select">
+                    <option value="">-- Select Experiment --</option>
+                </select>
+                <select id="chartAGroups" class="experiment-select" style="display: none; margin-left: 10px;" multiple>
+                    <option value="">-- Select Groups --</option>
+                </select>
+            </div>
+            
+            <div class="control-group compact-group">
+                <label>Chart B:</label>
+                <select id="chartBExperiment" class="experiment-select">
+                    <option value="">-- Select Experiment --</option>
+                </select>
+                <select id="chartBGroups" class="experiment-select" style="display: none; margin-left: 10px;" multiple>
+                    <option value="">-- Select Groups --</option>
+                </select>
+            </div>
+            
+            <div class="control-group compact-group">
+                <label>Time Range:</label>
+                <select id="timeRange" class="time-range-select">
+                    <option value="experiment">Use Experiment Range</option>
+                    <option value="15m">Last 15 minutes</option>
+                    <option value="1h" selected>Last 1 hour</option>
+                    <option value="6h">Last 6 hours</option>
+                    <option value="24h">Last 24 hours</option>
+                    <option value="custom">Custom Range</option>
+                </select>
+                <div id="customRange" class="custom-range" style="display: none;">
+                    <input type="datetime-local" id="startTime">
+                    <input type="datetime-local" id="endTime">
+                    <button id="applyCustomRange" class="btn btn-primary">Apply</button>
+                </div>
+            </div>
+            
+            <div class="control-group compact-group">
+                <label>Aggregation:</label>
+                <select id="aggregation" class="aggregation-select">
+                    <option value="10s">10 seconds</option>
+                    <option value="30s">30 seconds</option>
+                    <option value="1m" selected>1 minute</option>
+                    <option value="5m">5 minutes</option>
+                    <option value="15m">15 minutes</option>
+                    <option value="1h">1 hour</option>
+                </select>
+            </div>
+            
+        </section>
+
+        <!-- Feature Controls -->
         <section class="feature-controls">
             <div class="control-row">
                 <label class="toggle-label">
@@ -172,63 +169,53 @@
                 </div>
             </div>
         </section>
+
+        <!-- Collector Control Panel -->
+        <section class="controls-panel" style="margin-top: 20px;">
+            <div class="control-group">
+                <label>Data Collection:</label>
+                <label class="toggle-label" style="display: flex; align-items: center; gap: 10px;">
+                    <input type="checkbox" id="collectorEnabled" checked>
+                    <span>Polling Enabled</span>
+                    <span id="collectorStatus" style="font-size: 0.85rem; color: #666; margin-left: auto;">
+                        <span id="collectorRunningStatus">●</span> <span id="collectorStatusText">Loading...</span>
+                    </span>
+                </label>
+            </div>
+            
+            <div class="control-group">
+                <label>Polling Frequency:</label>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <input type="number" id="pollInterval" min="5" max="300" value="30" step="5" style="width: 80px; padding: 8px; border: 2px solid var(--gos-border); border-radius: 6px;">
+                    <span>seconds</span>
+                    <button id="updatePollInterval" class="btn btn-primary" style="margin-left: 10px;">Update</button>
+                </div>
+                <p style="font-size: 0.85rem; color: #666; margin-top: 5px;">
+                    Current: <span id="currentPollInterval">-</span>s | 
+                    <span style="color: #e74c3c;">⚠️ Lower values may hit API rate limits</span>
+                </p>
+            </div>
+        </section>
+        
+        <!-- Stats Explanation -->
+        <section class="controls-panel" style="margin-top: 15px; background: #f8f9fa; padding: 15px;">
+            <details>
+                <summary style="cursor: pointer; font-weight: 600; color: var(--gos-green-dark);">📊 What do these stats mean?</summary>
+                <div style="margin-top: 10px; font-size: 0.9rem; line-height: 1.6;">
+                    <p><strong>Total (kWh):</strong> Total energy consumed over the visible time range. Calculated by integrating power over time.</p>
+                    <p><strong>Avg (W):</strong> Average power consumption across all visible devices and time points in the selected range.</p>
+                    <p><strong>Mean (W):</strong> Statistical mean (average) of all power readings in the visible time range.</p>
+                    <p><strong>Median (W):</strong> Middle value when all power readings are sorted - less affected by spikes/outliers than mean.</p>
+                    <p style="margin-top: 10px; color: #666; font-style: italic;">
+                        💡 <strong>Tip:</strong> These stats update based on your selected time range. Zoom/pan the chart to see stats for specific periods!
+                    </p>
+                </div>
+            </details>
+        </section>
 {% endblock %}
 
 {% block extra_scripts %}
     <!-- Modals -->
-    <!-- Create Experiment Modal -->
-    <div id="createExperimentModal" class="modal">
-        <div class="modal-content">
-            <span class="close" onclick="closeModal('createExperimentModal')">&times;</span>
-            <h2>Create New Experiment</h2>
-            <p style="color: #666; font-size: 0.9rem; margin-bottom: 20px;">
-                Experiments are time-based studies that link to participant groups. Create groups first in "Manage Groups" if needed.
-            </p>
-            <form id="createExperimentForm" onsubmit="createExperiment(event)">
-                <div class="form-group">
-                    <label>Experiment Name:</label>
-                    <input type="text" id="experimentName" required placeholder="e.g., HLS Streaming Test - Dec 2025">
-                </div>
-                <div class="form-group">
-                    <label>Description:</label>
-                    <textarea id="experimentDescription" rows="3" placeholder="Optional description of what this experiment is testing"></textarea>
-                </div>
-                <div class="form-group">
-                    <label>Time Range:</label>
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
-                        <div>
-                            <label style="font-size: 0.85rem; color: #666;">Start Time:</label>
-                            <input type="datetime-local" id="experimentStartTime" required>
-                        </div>
-                        <div>
-                            <label style="font-size: 0.85rem; color: #666;">End Time:</label>
-                            <input type="datetime-local" id="experimentEndTime">
-                        </div>
-                    </div>
-                    <div style="margin-top: 10px;">
-                        <label class="toggle-label" style="display: flex; align-items: center; gap: 10px;">
-                            <input type="checkbox" id="experimentIsCurrent">
-                            <span>Current Experiment (running now - end time will be set when you stop it)</span>
-                        </label>
-                    </div>
-                    <p style="font-size: 0.85rem; color: #666; margin-top: 5px;">
-                        For past experiments, set both start and end times. For current experiments, only set start time and check "Current Experiment".
-                    </p>
-                </div>
-                <div class="form-group">
-                    <label>Link Participant Groups:</label>
-                    <div class="device-checkboxes" id="experimentGroups">
-                        <!-- Populated by JavaScript -->
-                    </div>
-                    <p style="font-size: 0.85rem; color: #666; margin-top: 5px;">
-                        Select one or more groups that participate in this experiment (groups contain devices)
-                    </p>
-                </div>
-                <button type="submit" class="btn btn-primary">Create Experiment</button>
-            </form>
-        </div>
-    </div>
-
     <!-- Add Annotation Modal -->
     <div id="addAnnotationModal" class="modal">
         <div class="modal-content">
@@ -287,49 +274,6 @@
             </form>
         </div>
     </div>
-
-        <!-- Collector Control Panel (moved to bottom) -->
-        <section class="controls-panel" style="margin-top: 20px;">
-            <div class="control-group">
-                <label>Data Collection:</label>
-                <label class="toggle-label" style="display: flex; align-items: center; gap: 10px;">
-                    <input type="checkbox" id="collectorEnabled" checked>
-                    <span>Polling Enabled</span>
-                    <span id="collectorStatus" style="font-size: 0.85rem; color: #666; margin-left: auto;">
-                        <span id="collectorRunningStatus">●</span> <span id="collectorStatusText">Loading...</span>
-                    </span>
-                </label>
-            </div>
-            
-            <div class="control-group">
-                <label>Polling Frequency:</label>
-                <div style="display: flex; align-items: center; gap: 10px;">
-                    <input type="number" id="pollInterval" min="5" max="300" value="30" step="5" style="width: 80px; padding: 8px; border: 2px solid var(--gos-border); border-radius: 6px;">
-                    <span>seconds</span>
-                    <button id="updatePollInterval" class="btn btn-primary" style="margin-left: 10px;">Update</button>
-                </div>
-                <p style="font-size: 0.85rem; color: #666; margin-top: 5px;">
-                    Current: <span id="currentPollInterval">-</span>s | 
-                    <span style="color: #e74c3c;">⚠️ Lower values may hit API rate limits</span>
-                </p>
-            </div>
-        </section>
-        
-        <!-- Stats Explanation (moved to bottom) -->
-        <section class="controls-panel" style="margin-top: 15px; background: #f8f9fa; padding: 15px;">
-            <details>
-                <summary style="cursor: pointer; font-weight: 600; color: var(--gos-green-dark);">📊 What do these stats mean?</summary>
-                <div style="margin-top: 10px; font-size: 0.9rem; line-height: 1.6;">
-                    <p><strong>Total (kWh):</strong> Total energy consumed over the visible time range. Calculated by integrating power over time.</p>
-                    <p><strong>Avg (W):</strong> Average power consumption across all visible devices and time points in the selected range.</p>
-                    <p><strong>Mean (W):</strong> Statistical mean (average) of all power readings in the visible time range.</p>
-                    <p><strong>Median (W):</strong> Middle value when all power readings are sorted - less affected by spikes/outliers than mean.</p>
-                    <p style="margin-top: 10px; color: #666; font-style: italic;">
-                        💡 <strong>Tip:</strong> These stats update based on your selected time range. Zoom/pan the chart to see stats for specific periods!
-                    </p>
-                </div>
-            </details>
-        </section>
 
     {% if exploration_js %}<script>{{ exploration_js | safe }}</script>{% endif %}
 {% endblock %}

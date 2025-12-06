@@ -431,8 +431,29 @@ TBD - To be determined with GOS team
 
 ---
 
-**Last Updated**: 2025-12-05  
-**Version**: 1.0.0  
-**Status**: Operational and Deployed
+**Last Updated**: 2025-12-06  
+**Version**: 1.0.0 (Initial Release)  
+**Status**: ✅ Operational and Deployed on Pi400 (staging)
+
+---
+
+## Release Notes - v1.0.0 (Initial Release)
+
+### What's New
+- ✅ Complete Docker-based containerization
+- ✅ Migration from InfluxDB to TimescaleDB (PostgreSQL extension)
+- ✅ GOS REM Data Exploration Tool with interactive charts
+- ✅ Experiment management system with device grouping
+- ✅ Snapshot gallery with annotations
+- ✅ Collector control via web UI (start/stop/polling frequency)
+- ✅ Default chart loading with all devices
+- ✅ Full GoS branding with logo and colors
+
+### Known Issues
+- None at this time
+
+### Migration Notes
+- Legacy InfluxDB data can be migrated using forward-fill script
+- Old native InfluxDB/Grafana installation on Pi400 has been decommissioned
 
 

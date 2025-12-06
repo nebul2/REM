@@ -485,6 +485,26 @@ async def manage_groups(request: Request):
     return response
 
 
+@app.get("/experiments", response_class=HTMLResponse)
+async def manage_experiments(request: Request):
+    """Experiment management page"""
+    # Get base URL from request for navigation links (works behind proxy)
+    scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
+    host = request.headers.get("x-forwarded-host", request.headers.get("host", "localhost:7001"))
+    base_url = f"{scheme}://{host}"
+    
+    response = templates.TemplateResponse("experiments.html", {
+        "request": request,
+        "css_content": load_all_css(),
+        "logo_data_uri": get_logo_data_uri(),
+        "base_url": base_url
+    })
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
+
+
 @app.get("/gallery", response_class=HTMLResponse)
 async def gallery(request: Request):
     """Snapshot gallery page"""

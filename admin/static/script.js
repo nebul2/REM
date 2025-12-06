@@ -58,8 +58,8 @@ async function createGroup(event) {
     }
 }
 
-// Delete group
-async function deleteGroup(groupName) {
+// Delete group - make it globally accessible
+window.deleteGroup = async function(groupName) {
     if (!confirm(`Are you sure you want to delete group "${groupName}"?`)) {
         return;
     }
@@ -76,12 +76,13 @@ async function deleteGroup(groupName) {
             alert(`Error: ${error.detail || 'Failed to delete group'}`);
         }
     } catch (error) {
+        console.error('Delete group error:', error);
         alert(`Error: ${error.message}`);
     }
 }
 
-// Edit group
-async function editGroup(groupName) {
+// Edit group - make it globally accessible
+window.editGroup = async function(groupName) {
     try {
         const response = await fetch('/api/groups');
         const data = await response.json();
@@ -127,6 +128,7 @@ async function editGroup(groupName) {
         // Show modal
         document.getElementById('editModal').style.display = 'block';
     } catch (error) {
+        console.error('Edit group error:', error);
         alert(`Error: ${error.message}`);
     }
 }
@@ -176,4 +178,26 @@ window.onclick = function(event) {
         closeEditModal();
     }
 }
+
+// Set up event listeners for edit/delete buttons using data attributes
+document.addEventListener('DOMContentLoaded', () => {
+    // Handle click events on buttons with data-action attribute using event delegation
+    document.addEventListener('click', (event) => {
+        const btn = event.target.closest('[data-action]');
+        if (!btn) return;
+        
+        const action = btn.getAttribute('data-action');
+        const groupName = btn.getAttribute('data-group');
+        
+        if (action === 'edit' && groupName) {
+            event.preventDefault();
+            event.stopPropagation();
+            editGroup(groupName);
+        } else if (action === 'delete' && groupName) {
+            event.preventDefault();
+            event.stopPropagation();
+            deleteGroup(groupName);
+        }
+    });
+});
 

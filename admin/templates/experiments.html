@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+
+{% block title %}Experiment Manager - GOS REM{% endblock %}
+
+{% block page_subtitle %}Experiment Manager{% endblock %}
+
+{% block nav_experiments_active %}active{% endblock %}
+
+{% block content %}
+    <div class="container">
+        <!-- Create New Experiment -->
+        <section class="card">
+            <h2>Create New Experiment</h2>
+            <button id="createExperimentBtn" class="btn btn-primary">Create Experiment</button>
+        </section>
+        
+        <!-- Existing Experiments -->
+        <section class="card">
+            <h2>Existing Experiments</h2>
+            <div id="experimentsList">
+                <p class="loading">Loading experiments...</p>
+            </div>
+        </section>
+    </div>
+
+    <!-- Create Experiment Modal -->
+    <div id="createExperimentModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeModal('createExperimentModal')">&times;</span>
+            <h2>Create New Experiment</h2>
+            <p style="color: #666; font-size: 0.9rem; margin-bottom: 20px;">
+                Experiments are time-based studies that link to participant groups. Create groups first in "Groups" if needed.
+            </p>
+            <form id="createExperimentForm" onsubmit="createExperiment(event)">
+                <div class="form-group">
+                    <label>Experiment Name:</label>
+                    <input type="text" id="experimentName" required placeholder="e.g., HLS Streaming Test - Dec 2025">
+                </div>
+                <div class="form-group">
+                    <label>Description:</label>
+                    <textarea id="experimentDescription" rows="3" placeholder="Optional description of what this experiment is testing"></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Time Range:</label>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                        <div>
+                            <label style="font-size: 0.85rem; color: #666;">Start Time:</label>
+                            <input type="datetime-local" id="experimentStartTime" required>
+                        </div>
+                        <div>
+                            <label style="font-size: 0.85rem; color: #666;">End Time:</label>
+                            <input type="datetime-local" id="experimentEndTime">
+                        </div>
+                    </div>
+                    <div style="margin-top: 10px;">
+                        <label class="toggle-label" style="display: flex; align-items: center; gap: 10px;">
+                            <input type="checkbox" id="experimentIsCurrent" onchange="toggleEndTimeRequired()">
+                            <span>Current Experiment (running now - end time will be set when you stop it)</span>
+                        </label>
+                    </div>
+                    <p style="font-size: 0.85rem; color: #666; margin-top: 5px;">
+                        For past experiments, set both start and end times. For current experiments, only set start time and check "Current Experiment".
+                    </p>
+                    <script>
+                    function toggleEndTimeRequired() {
+                        const isCurrent = document.getElementById('experimentIsCurrent').checked;
+                        const endTimeInput = document.getElementById('experimentEndTime');
+                        if (isCurrent) {
+                            endTimeInput.required = false;
+                            endTimeInput.disabled = true;
+                            endTimeInput.value = '';
+                        } else {
+                            endTimeInput.required = true;
+                            endTimeInput.disabled = false;
+                        }
+                    }
+                    </script>
+                </div>
+                <div class="form-group">
+                    <label>Link Participant Groups:</label>
+                    <div class="device-checkboxes" id="experimentGroups">
+                        <!-- Populated by JavaScript -->
+                    </div>
+                    <p style="font-size: 0.85rem; color: #666; margin-top: 5px;">
+                        Select one or more groups that participate in this experiment (groups contain devices)
+                    </p>
+                </div>
+                <button type="submit" class="btn btn-primary">Create Experiment</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Edit Experiment Modal -->
+    <div id="editExperimentModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeEditExperimentModal()">&times;</span>
+            <h2>Edit Experiment: <span id="editExperimentName"></span></h2>
+            <form id="editExperimentForm" onsubmit="updateExperiment(event)">
+                <div class="form-group">
+                    <label>Experiment Name:</label>
+                    <input type="text" id="editExperimentNameInput" required>
+                </div>
+                <div class="form-group">
+                    <label>Description:</label>
+                    <textarea id="editExperimentDescription" rows="3"></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Time Range:</label>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                        <div>
+                            <label style="font-size: 0.85rem; color: #666;">Start Time:</label>
+                            <input type="datetime-local" id="editExperimentStartTime">
+                        </div>
+                        <div>
+                            <label style="font-size: 0.85rem; color: #666;">End Time:</label>
+                            <input type="datetime-local" id="editExperimentEndTime">
+                        </div>
+                    </div>
+                    <div style="margin-top: 10px;">
+                        <label class="toggle-label" style="display: flex; align-items: center; gap: 10px;">
+                            <input type="checkbox" id="editExperimentIsCurrent">
+                            <span>Current Experiment (running now)</span>
+                        </label>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Link Participant Groups:</label>
+                    <div class="device-checkboxes" id="editExperimentGroups">
+                        <!-- Populated by JavaScript -->
+                    </div>
+                </div>
+                <button type="submit" class="btn btn-primary">Update Experiment</button>
+            </form>
+        </div>
+    </div>
+{% endblock %}
+
+{% block extra_scripts %}
+    <script src="/static/experiments.js"></script>
+{% endblock %}

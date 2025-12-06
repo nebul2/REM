@@ -5,6 +5,8 @@ let chartA = null;
 let chartB = null;
 let currentExperimentA = null;
 let currentExperimentB = null;
+let currentGroupsA = []; // Selected groups for Chart A
+let currentGroupsB = []; // Selected groups for Chart B
 let currentTimeRange = '1h';
 let currentAggregation = '1m';
 let allDevices = [];
@@ -53,6 +55,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
         
         console.log('Initialization complete. Experiments:', Object.keys(experiments).length);
+        
+        // Load default chart with all devices showing last hour
+        if (allDevices.length > 0) {
+            setTimeout(() => {
+                loadDefaultChart();
+            }, 500);
+        }
     } catch (error) {
         console.error('Initialization error:', error);
     }
@@ -118,14 +127,62 @@ async function loadAnnotations() {
 
 // Setup event listeners
 function setupEventListeners() {
-    document.getElementById('experimentA').addEventListener('change', (e) => {
+    // Chart A experiment selection
+    document.getElementById('chartAExperiment').addEventListener('change', (e) => {
         currentExperimentA = e.target.value;
-        if (currentExperimentA) loadExperimentData('A', currentExperimentA);
+        if (currentExperimentA) {
+            populateGroupsForChart('A', currentExperimentA);
+            // Auto-set time range if experiment has a time range
+            autoSetTimeRangeForExperiment(currentExperimentA);
+            // Load data after groups are populated (use setTimeout to ensure groups are set)
+            setTimeout(() => {
+                if (currentGroupsA.length > 0) {
+                    loadChartData('A');
+                }
+            }, 10);
+        } else {
+            populateGroupsForChart('A', null);
+            currentGroupsA = [];
+            if (chartA) chartA.destroy();
+            chartA = null;
+        }
     });
     
-    document.getElementById('experimentB').addEventListener('change', (e) => {
+    // Chart A groups selection
+    document.getElementById('chartAGroups').addEventListener('change', (e) => {
+        currentGroupsA = Array.from(e.target.selectedOptions).map(opt => opt.value);
+        if (currentExperimentA && currentGroupsA.length > 0) {
+            loadChartData('A');
+        }
+    });
+    
+    // Chart B experiment selection
+    document.getElementById('chartBExperiment').addEventListener('change', (e) => {
         currentExperimentB = e.target.value;
-        if (currentExperimentB) loadExperimentData('B', currentExperimentB);
+        if (currentExperimentB) {
+            populateGroupsForChart('B', currentExperimentB);
+            // Auto-set time range if experiment has a time range
+            autoSetTimeRangeForExperiment(currentExperimentB);
+            // Load data after groups are populated (use setTimeout to ensure groups are set)
+            setTimeout(() => {
+                if (currentGroupsB.length > 0) {
+                    loadChartData('B');
+                }
+            }, 10);
+        } else {
+            populateGroupsForChart('B', null);
+            currentGroupsB = [];
+            if (chartB) chartB.destroy();
+            chartB = null;
+        }
+    });
+    
+    // Chart B groups selection
+    document.getElementById('chartBGroups').addEventListener('change', (e) => {
+        currentGroupsB = Array.from(e.target.selectedOptions).map(opt => opt.value);
+        if (currentExperimentB && currentGroupsB.length > 0) {
+            loadChartData('B');
+        }
     });
     
     document.getElementById('timeRange').addEventListener('change', (e) => {
@@ -134,20 +191,20 @@ function setupEventListeners() {
             document.getElementById('customRange').style.display = 'flex';
         } else {
             document.getElementById('customRange').style.display = 'none';
-            if (currentExperimentA) loadExperimentData('A', currentExperimentA);
-            if (currentExperimentB) loadExperimentData('B', currentExperimentB);
+            if (currentExperimentA && currentGroupsA.length > 0) loadChartData('A');
+            if (currentExperimentB && currentGroupsB.length > 0) loadChartData('B');
         }
     });
     
     document.getElementById('applyCustomRange').addEventListener('click', () => {
-        if (currentExperimentA) loadExperimentData('A', currentExperimentA);
-        if (currentExperimentB) loadExperimentData('B', currentExperimentB);
+        if (currentExperimentA && currentGroupsA.length > 0) loadChartData('A');
+        if (currentExperimentB && currentGroupsB.length > 0) loadChartData('B');
     });
     
     document.getElementById('aggregation').addEventListener('change', (e) => {
         currentAggregation = e.target.value;
-        if (currentExperimentA) loadExperimentData('A', currentExperimentA);
-        if (currentExperimentB) loadExperimentData('B', currentExperimentB);
+        if (currentExperimentA && currentGroupsA.length > 0) loadChartData('A');
+        if (currentExperimentB && currentGroupsB.length > 0) loadChartData('B');
     });
     
     document.getElementById('curveType').addEventListener('change', (e) => {
@@ -187,11 +244,6 @@ function setupEventListeners() {
     });
     
     // Buttons
-    document.getElementById('createExperimentBtn').addEventListener('click', () => {
-        populateGroupCheckboxes(); // Populate groups when opening modal
-        openModal('createExperimentModal');
-    });
-    
     document.getElementById('addAnnotationBtn').addEventListener('click', () => {
         openModal('addAnnotationModal');
     });
@@ -199,6 +251,74 @@ function setupEventListeners() {
     document.getElementById('saveSnapshotBtn').addEventListener('click', () => {
         populateExperimentSelects(); // Ensure snapshot experiment select is populated
         openModal('saveSnapshotModal');
+    });
+    
+    // Start/End Experiment handlers
+    document.getElementById('startExperimentBtn').addEventListener('click', async () => {
+        // Get currently selected experiment (Chart A takes priority)
+        const experimentId = currentExperimentA || currentExperimentB;
+        if (!experimentId) {
+            alert('Please select an experiment first');
+            return;
+        }
+        
+        try {
+            const response = await fetch(`/api/experiments/${experimentId}/start`, {
+                method: 'POST'
+            });
+            
+            if (response.ok) {
+                const result = await response.json();
+                experiments[experimentId] = result.experiment;
+                populateExperimentSelects();
+                alert(`Experiment "${result.experiment.name}" started!`);
+            } else {
+                const error = await response.json();
+                alert(`Error: ${error.detail || 'Failed to start experiment'}`);
+            }
+        } catch (error) {
+            alert(`Error: ${error.message}`);
+        }
+    });
+    
+    document.getElementById('endExperimentBtn').addEventListener('click', async () => {
+        // Get currently selected experiment (Chart A takes priority)
+        const experimentId = currentExperimentA || currentExperimentB;
+        if (!experimentId) {
+            alert('Please select an experiment first');
+            return;
+        }
+        
+        const experiment = experiments[experimentId];
+        if (!experiment || !experiment.is_current) {
+            alert('This experiment is not currently running');
+            return;
+        }
+        
+        if (!confirm(`End experiment "${experiment.name}"? This will set the end time to now.`)) {
+            return;
+        }
+        
+        try {
+            const response = await fetch(`/api/experiments/${experimentId}/end`, {
+                method: 'POST'
+            });
+            
+            if (response.ok) {
+                const result = await response.json();
+                experiments[experimentId] = result.experiment;
+                populateExperimentSelects();
+                alert(`Experiment "${result.experiment.name}" ended!`);
+                // Reload charts to reflect new time range
+                if (currentExperimentA && currentGroupsA.length > 0) loadChartData('A');
+                if (currentExperimentB && currentGroupsB.length > 0) loadChartData('B');
+            } else {
+                const error = await response.json();
+                alert(`Error: ${error.detail || 'Failed to end experiment'}`);
+            }
+        } catch (error) {
+            alert(`Error: ${error.message}`);
+        }
     });
     
     // Collector Control
@@ -222,20 +342,20 @@ function setupEventListeners() {
     setInterval(loadCollectorStatus, 10000);
     
     document.getElementById('refreshBtn').addEventListener('click', () => {
-        if (currentExperimentA) loadExperimentData('A', currentExperimentA);
-        if (currentExperimentB) loadExperimentData('B', currentExperimentB);
+        if (currentExperimentA && currentGroupsA.length > 0) loadChartData('A');
+        if (currentExperimentB && currentGroupsB.length > 0) loadChartData('B');
     });
 }
 
-// Populate experiment selects
+// Populate experiment selects for Chart A, Chart B, and Snapshot
 function populateExperimentSelects() {
-    const selectA = document.getElementById('experimentA');
-    const selectB = document.getElementById('experimentB');
+    const selectA = document.getElementById('chartAExperiment');
+    const selectB = document.getElementById('chartBExperiment');
     const snapshotSelect = document.getElementById('snapshotExperiment');
     
     // Clear options except first
-    selectA.innerHTML = '<option value="">-- Select Experiment --</option>';
-    selectB.innerHTML = '<option value="">-- Select Experiment --</option>';
+    if (selectA) selectA.innerHTML = '<option value="">-- Select Experiment --</option>';
+    if (selectB) selectB.innerHTML = '<option value="">-- Select Experiment --</option>';
     if (snapshotSelect) {
         snapshotSelect.innerHTML = '<option value="">-- Select Experiment --</option>';
     }
@@ -243,19 +363,31 @@ function populateExperimentSelects() {
     for (const [experimentId, exp] of Object.entries(experiments)) {
         const displayName = exp.name || experimentId;
         const timeRange = exp.time_range || {};
+        const isCurrent = exp.is_current || false;
         const startDate = timeRange.start ? new Date(timeRange.start).toLocaleDateString() : '';
         const endDate = timeRange.end ? new Date(timeRange.end).toLocaleDateString() : '';
-        const dateRange = (startDate && endDate) ? ` (${startDate} - ${endDate})` : '';
+        let dateRange = '';
+        if (isCurrent) {
+            dateRange = ` (Current - started ${startDate})`;
+        } else if (startDate && endDate) {
+            dateRange = ` (${startDate} - ${endDate})`;
+        } else if (startDate) {
+            dateRange = ` (started ${startDate})`;
+        }
         
-        const optionA = document.createElement('option');
-        optionA.value = experimentId;
-        optionA.textContent = `${displayName}${dateRange}`;
-        selectA.appendChild(optionA);
+        if (selectA) {
+            const optionA = document.createElement('option');
+            optionA.value = experimentId;
+            optionA.textContent = `${displayName}${dateRange}`;
+            selectA.appendChild(optionA);
+        }
         
-        const optionB = document.createElement('option');
-        optionB.value = experimentId;
-        optionB.textContent = `${displayName}${dateRange}`;
-        selectB.appendChild(optionB);
+        if (selectB) {
+            const optionB = document.createElement('option');
+            optionB.value = experimentId;
+            optionB.textContent = `${displayName}${dateRange}`;
+            selectB.appendChild(optionB);
+        }
         
         if (snapshotSelect) {
             const optionSnapshot = document.createElement('option');
@@ -263,6 +395,60 @@ function populateExperimentSelects() {
             optionSnapshot.textContent = `${displayName}${dateRange}`;
             snapshotSelect.appendChild(optionSnapshot);
         }
+    }
+}
+
+// Populate groups dropdown for a chart based on selected experiment
+function populateGroupsForChart(side, experimentId) {
+    const groupsSelect = document.getElementById(`chart${side}Groups`);
+    if (!groupsSelect) return;
+    
+    // Clear existing options
+    groupsSelect.innerHTML = '';
+    
+    if (!experimentId) {
+        groupsSelect.style.display = 'none';
+        return;
+    }
+    
+    const experiment = experiments[experimentId];
+    if (!experiment) {
+        groupsSelect.style.display = 'none';
+        return;
+    }
+    
+    const linkedGroups = experiment.linked_groups || [];
+    if (linkedGroups.length === 0) {
+        groupsSelect.innerHTML = '<option value="">No groups in this experiment</option>';
+        groupsSelect.style.display = 'block';
+        return;
+    }
+    
+    // Add options for each linked group
+    linkedGroups.forEach(groupName => {
+        const group = groups[groupName];
+        if (group) {
+            const option = document.createElement('option');
+            option.value = groupName;
+            const deviceCount = (group.devices || []).length;
+            option.textContent = `${group.name || groupName} (${deviceCount} device${deviceCount !== 1 ? 's' : ''})`;
+            groupsSelect.appendChild(option);
+        }
+    });
+    
+    groupsSelect.style.display = 'block';
+    
+    // Auto-select all groups by default
+    Array.from(groupsSelect.options).forEach(option => {
+        if (option.value) option.selected = true;
+    });
+    
+    // Update the current groups array after auto-selection
+    const selectedGroups = Array.from(groupsSelect.selectedOptions).map(opt => opt.value);
+    if (side === 'A') {
+        currentGroupsA = selectedGroups;
+    } else {
+        currentGroupsB = selectedGroups;
     }
 }
 
@@ -350,6 +536,16 @@ function getTimeRange() {
         return { start, end };
     }
     
+    if (currentTimeRange === 'experiment') {
+        // Use experiment time range - this will be handled in loadChartData
+        // For now, return a default range that will be overridden
+        const now = new Date();
+        return {
+            start: new Date(now - 60 * 60 * 1000).toISOString(),
+            end: now.toISOString()
+        };
+    }
+    
     const now = new Date();
     let start;
     
@@ -376,41 +572,94 @@ function getTimeRange() {
     };
 }
 
-// Load experiment data
-async function loadExperimentData(side, experimentId) {
+// Auto-set time range based on experiment
+function autoSetTimeRangeForExperiment(experimentId) {
     const experiment = experiments[experimentId];
-    if (!experiment) {
-        console.error('Invalid experiment:', experimentId);
+    if (!experiment) return;
+    
+    const timeRange = experiment.time_range || {};
+    const isCurrent = experiment.is_current || false;
+    
+    // If experiment has a time range and is not current, use it
+    if (!isCurrent && timeRange.start && timeRange.end) {
+        const timeRangeSelect = document.getElementById('timeRange');
+        if (timeRangeSelect) {
+            timeRangeSelect.value = 'experiment';
+            currentTimeRange = 'experiment';
+            // Hide custom range inputs
+            document.getElementById('customRange').style.display = 'none';
+        }
+    }
+}
+
+// Load chart data for a side (A or B) with selected experiment and groups
+async function loadChartData(side) {
+    const experimentId = side === 'A' ? currentExperimentA : currentExperimentB;
+    const selectedGroups = side === 'A' ? currentGroupsA : currentGroupsB;
+    
+    if (!experimentId) {
+        console.error(`No experiment selected for Chart ${side}`);
         return;
     }
     
-    // Get devices from linked groups
-    const experimentDevices = [];
-    const linkedGroups = experiment.linked_groups || [];
+    if (!selectedGroups || selectedGroups.length === 0) {
+        console.error(`No groups selected for Chart ${side}`);
+        return;
+    }
     
-    for (const groupName of linkedGroups) {
+    const experiment = experiments[experimentId];
+    if (!experiment) {
+        console.error(`Invalid experiment: ${experimentId}`);
+        return;
+    }
+    
+    // Get devices from selected groups only
+    const chartDevices = [];
+    for (const groupName of selectedGroups) {
         const group = groups[groupName];
         if (group && group.devices) {
-            experimentDevices.push(...group.devices);
+            chartDevices.push(...group.devices);
         }
     }
     
     // Remove duplicates
-    const uniqueDevices = [...new Set(experimentDevices)];
+    const uniqueDevices = [...new Set(chartDevices)];
     
     if (uniqueDevices.length === 0) {
-        alert(`Experiment "${experiment.name}" has no devices. Please link groups that contain devices.`);
+        alert(`No devices found in selected groups for Chart ${side}`);
         return;
     }
     
-    // Use experiment's time range if defined, otherwise use current time range selector
+    // Determine time range
     let timeRange;
-    if (experiment.time_range && experiment.time_range.start && experiment.time_range.end) {
-        timeRange = {
-            start: experiment.time_range.start,
-            end: experiment.time_range.end
-        };
+    const isCurrent = experiment.is_current || false;
+    const timeRangeSelect = document.getElementById('timeRange');
+    const selectedTimeRange = timeRangeSelect ? timeRangeSelect.value : currentTimeRange;
+    const useExperimentRange = selectedTimeRange === 'experiment';
+    
+    if (useExperimentRange && experiment.time_range) {
+        const expTimeRange = experiment.time_range;
+        if (isCurrent) {
+            // Current experiment: start time to now
+            timeRange = {
+                start: expTimeRange.start || new Date().toISOString(),
+                end: new Date().toISOString()
+            };
+        } else if (expTimeRange.start && expTimeRange.end) {
+            // Past experiment: use its time range
+            timeRange = {
+                start: expTimeRange.start,
+                end: expTimeRange.end
+            };
+        } else {
+            // Fallback to selector
+            timeRange = getTimeRange();
+        }
     } else {
+        // Use time range selector - make sure we use the actual dropdown value
+        if (selectedTimeRange !== currentTimeRange) {
+            currentTimeRange = selectedTimeRange;
+        }
         timeRange = getTimeRange();
     }
     
@@ -426,13 +675,62 @@ async function loadExperimentData(side, experimentId) {
             const experimentWithDevices = {
                 ...experiment,
                 devices: uniqueDevices,
-                linked_groups: linkedGroups
+                linked_groups: selectedGroups,
+                selected_groups: selectedGroups
             };
             updateChart(side, result.data, uniqueDevices, result.stats, experimentWithDevices);
         }
     } catch (error) {
-        console.error(`Error loading experiment ${side}:`, error);
-        alert(`Error loading experiment: ${error.message}`);
+        console.error(`Error loading chart ${side}:`, error);
+        alert(`Error loading chart: ${error.message}`);
+    }
+}
+
+// Load default chart with all devices (last hour)
+async function loadDefaultChart() {
+    if (allDevices.length === 0) {
+        console.log('No devices available for default chart');
+        return;
+    }
+    
+    console.log(`Loading default chart with ${allDevices.length} devices for last hour...`);
+    
+    // Set time range to 1h
+    currentTimeRange = '1h';
+    const timeRangeSelect = document.getElementById('timeRange');
+    if (timeRangeSelect) {
+        timeRangeSelect.value = '1h';
+    }
+    
+    // Create a default experiment-like object for all devices
+    const defaultExperiment = {
+        id: 'all-devices',
+        name: 'All Devices',
+        description: 'Default view showing all devices',
+        time_range: null,
+        is_current: false,
+        devices: allDevices,
+        linked_groups: [],
+        selected_groups: []
+    };
+    
+    // Get time range
+    const timeRange = getTimeRange();
+    
+    try {
+        const devicesParam = allDevices.join(',');
+        const url = `/api/data/power?devices=${encodeURIComponent(devicesParam)}&start=${encodeURIComponent(timeRange.start)}&end=${encodeURIComponent(timeRange.end)}&interval=${currentAggregation}`;
+        
+        const response = await fetch(url);
+        const result = await response.json();
+        
+        if (result.success && result.data) {
+            // Update chart A with all devices
+            updateChart('A', result.data, allDevices, result.stats, defaultExperiment);
+            console.log('Default chart loaded successfully');
+        }
+    } catch (error) {
+        console.error('Error loading default chart:', error);
     }
 }
 
@@ -1107,25 +1405,38 @@ function updateCharts() {
     if (!splitCharts) {
         updateOverlayChart();
     } else {
-        if (currentExperimentA) loadExperimentData('A', currentExperimentA);
-        if (currentExperimentB) loadExperimentData('B', currentExperimentB);
+        if (currentExperimentA && currentGroupsA.length > 0) loadChartData('A');
+        if (currentExperimentB && currentGroupsB.length > 0) loadChartData('B');
     }
 }
 
 // Toggle overlay/split mode
 function toggleOverlay() {
-    const chartBContainer = document.querySelector('.charts-section > .chart-container:last-child');
+    const chartBContainer = document.getElementById('chartContainerB');
+    
     if (!splitCharts) {
-        // Overlay mode: Hide chart B container
-        if (chartBContainer) chartBContainer.style.display = 'none';
+        // Overlay mode: Hide chart B container completely
+        if (chartBContainer) {
+            chartBContainer.style.display = 'none';
+        }
         // Show overlay on chart A
         updateOverlayChart();
     } else {
-        // Split mode: Show chart B container
-        if (chartBContainer) chartBContainer.style.display = 'block';
+        // Split mode: Show chart B container only if it has data
+        if (chartBContainer) {
+            if (currentExperimentB && currentGroupsB.length > 0) {
+                chartBContainer.style.display = 'block';
+                // Load Chart B data if not already loaded
+                if (!chartB) {
+                    loadChartData('B');
+                }
+            } else {
+                chartBContainer.style.display = 'none';
+            }
+        }
         // Load separate charts
-        if (currentExperimentA) loadExperimentData('A', currentExperimentA);
-        if (currentExperimentB) loadExperimentData('B', currentExperimentB);
+        if (currentExperimentA && currentGroupsA.length > 0) loadChartData('A');
+        if (currentExperimentB && currentGroupsB.length > 0) loadChartData('B');
     }
 }
 
@@ -1410,6 +1721,7 @@ async function createExperiment(event) {
     const description = document.getElementById('experimentDescription').value;
     const startTime = document.getElementById('experimentStartTime').value;
     const endTime = document.getElementById('experimentEndTime').value;
+    const isCurrent = document.getElementById('experimentIsCurrent').checked;
     const checkboxes = document.querySelectorAll('#experimentGroups input[type="checkbox"]:checked');
     const selectedGroups = Array.from(checkboxes).map(cb => cb.value);
     
@@ -1418,8 +1730,14 @@ async function createExperiment(event) {
         return;
     }
     
-    if (!startTime || !endTime) {
-        alert('Please provide both start and end times');
+    if (!startTime) {
+        alert('Please provide a start time');
+        return;
+    }
+    
+    // For current experiments, end_time is optional
+    if (!isCurrent && !endTime) {
+        alert('Please provide an end time for past experiments');
         return;
     }
     
@@ -1428,7 +1746,10 @@ async function createExperiment(event) {
         formData.append('name', name);
         formData.append('description', description || '');
         formData.append('start_time', new Date(startTime).toISOString());
-        formData.append('end_time', new Date(endTime).toISOString());
+        if (endTime) {
+            formData.append('end_time', new Date(endTime).toISOString());
+        }
+        formData.append('is_current', isCurrent ? 'true' : 'false');
         formData.append('linked_groups', selectedGroups.join(','));
         
         const response = await fetch('/api/experiments', {
@@ -1445,10 +1766,19 @@ async function createExperiment(event) {
             closeModal('createExperimentModal');
             document.getElementById('createExperimentForm').reset();
             
-            // Select the new experiment
-            document.getElementById('experimentA').value = experimentId;
+            // Select the new experiment in Chart A
+            document.getElementById('chartAExperiment').value = experimentId;
             currentExperimentA = experimentId;
-            loadExperimentData('A', experimentId);
+            populateGroupsForChart('A', experimentId);
+            autoSetTimeRangeForExperiment(experimentId);
+            // Get selected groups and load chart
+            const groupsSelect = document.getElementById('chartAGroups');
+            if (groupsSelect) {
+                currentGroupsA = Array.from(groupsSelect.selectedOptions).map(opt => opt.value);
+                if (currentGroupsA.length > 0) {
+                    loadChartData('A');
+                }
+            }
         } else {
             const error = await response.json();
             alert(`Error: ${error.detail || 'Failed to create experiment'}`);
@@ -1492,8 +1822,8 @@ async function addAnnotation(event) {
             
             // Reload annotations and refresh charts
             await loadAnnotations();
-            if (currentExperimentA) loadExperimentData('A', currentExperimentA);
-            if (currentExperimentB) loadExperimentData('B', currentExperimentB);
+            if (currentExperimentA && currentGroupsA.length > 0) loadChartData('A');
+            if (currentExperimentB && currentGroupsB.length > 0) loadChartData('B');
         } else {
             const error = await response.json();
             alert(`Error: ${error.detail || 'Failed to add annotation'}`);
