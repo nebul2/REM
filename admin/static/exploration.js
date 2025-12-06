@@ -1403,10 +1403,21 @@ function showAnnotationPopup(annotation, x, y) {
 // Update charts (for toggles)
 function updateCharts() {
     if (!splitCharts) {
+        // Overlay mode: rebuild overlay chart
         updateOverlayChart();
     } else {
-        if (currentExperimentA && currentGroupsA.length > 0) loadChartData('A');
-        if (currentExperimentB && currentGroupsB.length > 0) loadChartData('B');
+        // Split mode: rebuild both charts with existing data if available
+        if (chartDataA) {
+            updateChart('A', chartDataA.data, chartDataA.devices, chartDataA.stats, chartDataA.experiment);
+        } else if (currentExperimentA && currentGroupsA.length > 0) {
+            loadChartData('A');
+        }
+        
+        if (chartDataB) {
+            updateChart('B', chartDataB.data, chartDataB.devices, chartDataB.stats, chartDataB.experiment);
+        } else if (currentExperimentB && currentGroupsB.length > 0) {
+            loadChartData('B');
+        }
     }
 }
 
@@ -1447,8 +1458,24 @@ async function updateOverlayChart() {
     const experimentA = experiments[currentExperimentA];
     if (!experimentA) return;
     
-    const dataA = await loadExperimentDataRaw('A', currentExperimentA);
-    const dataB = currentExperimentB ? await loadExperimentDataRaw('B', currentExperimentB) : null;
+    // Use stored data if available (faster, especially for toggles)
+    let dataA, dataB;
+    if (chartDataA && chartDataA.data) {
+        dataA = {
+            data: chartDataA.data,
+            devices: chartDataA.devices,
+            stats: chartDataA.stats
+        };
+        dataB = (chartDataB && chartDataB.data) ? {
+            data: chartDataB.data,
+            devices: chartDataB.devices,
+            stats: chartDataB.stats
+        } : null;
+    } else {
+        // Fallback to loading from server
+        dataA = await loadExperimentDataRaw('A', currentExperimentA);
+        dataB = currentExperimentB ? await loadExperimentDataRaw('B', currentExperimentB) : null;
+    }
     
     if (!dataA || !dataA.data) return;
     
