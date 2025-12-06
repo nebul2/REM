@@ -8,9 +8,89 @@ A Docker-based system for collecting real-time power consumption data from TP-Li
 
 ## Quick Links
 
-- **[Project Plan](PROJECT_PLAN.md)** - Detailed implementation plan and architecture
-- **[Current Assessment](CURRENT_ASSESSMENT.md)** - Analysis of existing Pi400 setup
-- **[DevBench Dashboard](http://localhost:8888)** - Project management
+- **[Simple Deployment Guide](#simple-deployment-guide)** - Step-by-step setup for non-technical users
+- **[Documentation](docs/)** - All development notes and detailed guides
+- **[Project Plan](docs/PROJECT_PLAN.md)** - Detailed implementation plan and architecture
+
+---
+
+## Simple Deployment Guide
+
+**For non-technical users - Get the system running in under 10 minutes!**
+
+### Prerequisites
+You'll need:
+- A computer with **Docker Desktop** installed ([Download here](https://www.docker.com/products/docker-desktop))
+- Your **TP-Link Cloud API credentials** (Client ID, Client Secret, and Refresh Token)
+- About 10 minutes
+
+### Step 1: Install Docker
+1. Download and install **Docker Desktop** from [docker.com](https://www.docker.com/products/docker-desktop)
+2. Open Docker Desktop and make sure it's running (you'll see a Docker icon in your system tray)
+
+### Step 2: Get the Code
+1. Open a terminal/command prompt
+2. Run:
+   ```bash
+   git clone git@github.com:dom-robinson/stats.git
+   cd stats
+   ```
+   (Or download the ZIP file from GitHub and extract it, then open a terminal in that folder)
+
+### Step 3: Configure
+1. Copy the template file:
+   ```bash
+   cp ENV_TEMPLATE .env
+   ```
+
+2. Open the `.env` file in a text editor and fill in your TP-Link credentials:
+   ```
+   TPLINK_CLIENT_ID=your-client-id-here
+   TPLINK_CLIENT_SECRET=your-secret-here
+   TPLINK_REFRESH_TOKEN=your-refresh-token-here
+   POSTGRES_PASSWORD=choose-a-secure-password
+   GRAFANA_ADMIN_PASSWORD=choose-a-secure-password
+   ```
+
+### Step 4: Start Everything
+Run this command:
+```bash
+docker-compose up -d
+```
+
+Wait about 30 seconds, then check if everything started:
+```bash
+docker-compose ps
+```
+
+All services should show "Up" status.
+
+### Step 5: Access the System
+Open your web browser and go to:
+- **Main Interface**: http://localhost:7001
+- (Optional) **Grafana Dashboard**: http://localhost:7003
+
+### Step 6: View Your Data
+1. The system will automatically start collecting data from your TP-Link devices
+2. Click "Exploration" in the top menu to see charts
+3. Click "Groups" to organize your devices into experiment groups
+4. Data will start appearing within 30 seconds
+
+### Stopping the System
+To stop everything:
+```bash
+docker-compose down
+```
+
+To stop but keep your data:
+```bash
+docker-compose stop
+```
+
+### Need Help?
+- Check the logs: `docker-compose logs collector`
+- See [Troubleshooting](#troubleshooting) section below
+- Check the [detailed deployment guide](docs/DEPLOYMENT_SIMPLE.md)
 
 ---
 
@@ -95,27 +175,24 @@ The Greening of Streaming (GOS) organization uses this system to:
 
 ---
 
-## Quick Start
+## Quick Start (For Developers)
 
-**👉 For the simplest deployment instructions, see [DEPLOYMENT_SIMPLE.md](DEPLOYMENT_SIMPLE.md)**
+See [Simple Deployment Guide](#simple-deployment-guide) above for step-by-step instructions.
+
+For developers familiar with Docker:
 
 ```bash
-# Clone repository
 git clone git@github.com:dom-robinson/stats.git
 cd stats
-
-# Configure (see DEPLOYMENT_SIMPLE.md for details)
 cp ENV_TEMPLATE .env
 # Edit .env with your credentials
-
-# Start everything
 docker-compose up -d
-
-# Wait 30 seconds, then access:
-# - Data Exploration Tool: http://localhost:7001
-# - Manage Groups: http://localhost:7001/manage
-# - Snapshot Gallery: http://localhost:7001/gallery
 ```
+
+Access:
+- **Data Exploration Tool**: http://localhost:7001
+- **Manage Groups**: http://localhost:7001/manage
+- **Snapshot Gallery**: http://localhost:7001/gallery
 
 ---
 
@@ -433,7 +510,8 @@ TBD - To be determined with GOS team
 
 **Last Updated**: 2025-12-06  
 **Version**: 1.0.0 (Initial Release)  
-**Status**: ✅ Operational and Deployed on Pi400 (staging)
+**Status**: ✅ Operational and Deployed on Pi400 (staging)  
+**Documentation**: All development notes and guides are in the [`docs/`](docs/) folder
 
 ---
 

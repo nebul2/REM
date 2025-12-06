@@ -220,22 +220,58 @@ function setupEventListeners() {
     
     document.getElementById('showMean').addEventListener('change', (e) => {
         showMean = e.target.checked;
-        updateCharts();
+        console.log('Toggle Mean:', showMean);
+        try {
+            if (typeof updateCharts === 'function') {
+                updateCharts();
+            } else {
+                console.error('updateCharts is not a function!');
+            }
+        } catch (error) {
+            console.error('Error in showMean toggle:', error);
+        }
     });
     
     document.getElementById('showMedian').addEventListener('change', (e) => {
         showMedian = e.target.checked;
-        updateCharts();
+        console.log('Toggle Median:', showMedian);
+        try {
+            if (typeof updateCharts === 'function') {
+                updateCharts();
+            } else {
+                console.error('updateCharts is not a function!');
+            }
+        } catch (error) {
+            console.error('Error in showMedian toggle:', error);
+        }
     });
     
     document.getElementById('showTotal').addEventListener('change', (e) => {
         showTotal = e.target.checked;
-        updateCharts();
+        console.log('Toggle Total:', showTotal);
+        try {
+            if (typeof updateCharts === 'function') {
+                updateCharts();
+            } else {
+                console.error('updateCharts is not a function!');
+            }
+        } catch (error) {
+            console.error('Error in showTotal toggle:', error);
+        }
     });
     
     document.getElementById('showAverage').addEventListener('change', (e) => {
         showAverage = e.target.checked;
-        updateCharts();
+        console.log('Toggle Average:', showAverage);
+        try {
+            if (typeof updateCharts === 'function') {
+                updateCharts();
+            } else {
+                console.error('updateCharts is not a function!');
+            }
+        } catch (error) {
+            console.error('Error in showAverage toggle:', error);
+        }
     });
     
     document.getElementById('splitCharts').addEventListener('change', (e) => {
@@ -776,22 +812,28 @@ function initializeCharts() {
                 },
                 tooltip: {
                     mode: 'nearest',
-                    intersect: true,
+                    intersect: false,
                     callbacks: {
                         title: function(context) {
                             // Show timestamp
-                            return context[0].label;
+                            if (context && context.length > 0) {
+                                return context[0].label;
+                            }
+                            return '';
                         },
                         label: function(context) {
                             // Show only the hovered line's label and value
                             const label = context.dataset.label || '';
-                            const value = context.parsed.y !== null ? context.parsed.y.toFixed(1) + ' W' : 'N/A';
+                            const value = context.parsed.y !== null && context.parsed.y !== undefined ? context.parsed.y.toFixed(1) + ' W' : 'N/A';
                             return `${label}: ${value}`;
-                        },
-                        filter: function(tooltipItem) {
-                            // Only show the first item (the one being hovered)
-                            return tooltipItem.datasetIndex === tooltipItem.dataIndex || tooltipItem.elementIndex === 0;
                         }
+                    },
+                    filter: function(tooltipItems) {
+                        // Only show the first/closest tooltip item (the one actually being hovered)
+                        if (tooltipItems && tooltipItems.length > 0) {
+                            return [tooltipItems[0]];
+                        }
+                        return tooltipItems;
                     }
                 },
                 annotation: {
@@ -1093,12 +1135,18 @@ function updateChart(side, data, devices, stats, experiment) {
         }
     }
     
+    // Clear existing datasets completely
+    chart.data.datasets = [];
+    chart.update('none'); // Clear first
+    
+    // Set new datasets
     chart.data.datasets = datasets;
     
     // Add annotation markers for this experiment (as dots below timeline)
-    addAnnotationMarkers(chart, experiment.name || experiment, data);
+    addAnnotationMarkers(chart, experiment.name || experiment.id || experiment, data);
     
-    chart.update();
+    // Force complete chart update
+    chart.update('none');
     
     // Store chart data for legend-based recalculation
     if (side === 'A') {
@@ -1245,23 +1293,46 @@ function updateStatisticalOverlays(chart, visibleDevices, data, allDevices, side
             });
         }
         
-        // Total (Sum)
+        // Total (Sum) - exclude zeros and nulls to prevent wavy lines
         if (showTotal) {
+            // Calculate totals, excluding zeros and nulls for smoother lines
             const totalData = allValues.map(item => {
-                if (item.values.length === 0) return null;
-                const sum = item.values.reduce((a, b) => a + b, 0);
-                return { x: item.timestamp, y: sum > 0 ? sum : null };
-            }).filter(p => p !== null && p.y !== null);
+                // Filter out null, undefined, NaN, and zero values
+                const validValues = item.values.filter(v => 
+                    v !== null && 
+                    v !== undefined && 
+                    !isNaN(v) && 
+                    v > 0 // Exclude zeros to prevent wavy behavior
+                );
+                if (validValues.length === 0) return null;
+                const sum = validValues.reduce((a, b) => a + b, 0);
+                return sum > 0 ? { x: item.timestamp, y: sum } : null;
+            }).filter(p => p !== null && p.y !== null && p.y > 0);
             
-            newStatDatasets.push({
-                label: side ? `${side}: Total` : 'Total (Sum)',
-                data: totalData,
-                borderColor: side === 'A' ? '#9b59b6' : (side === 'B' ? '#8e44ad' : 'purple'),
-                borderWidth: 3,
-                pointRadius: 0,
-                fill: false,
-                ...curveConfig
-            });
+            // Forward-fill gaps to smooth out the line (prevent wavy pattern)
+            let lastKnownTotal = null;
+            const smoothedTotalData = totalData.map((point, index) => {
+                if (point && point.y !== null && point.y > 0) {
+                    lastKnownTotal = point.y;
+                    return point;
+                } else if (lastKnownTotal !== null) {
+                    // Forward-fill with last known value
+                    return { x: point.x, y: lastKnownTotal };
+                }
+                return null;
+            }).filter(p => p !== null && p.y !== null && p.y > 0);
+            
+            if (smoothedTotalData.length > 0) {
+                newStatDatasets.push({
+                    label: side ? `${side}: Total` : 'Total (Sum)',
+                    data: smoothedTotalData,
+                    borderColor: side === 'A' ? '#9b59b6' : (side === 'B' ? '#8e44ad' : 'purple'),
+                    borderWidth: 3,
+                    pointRadius: 0,
+                    fill: false,
+                    ...curveConfig
+                });
+            }
         }
         
         // Average
@@ -1402,20 +1473,30 @@ function showAnnotationPopup(annotation, x, y) {
 
 // Update charts (for toggles)
 function updateCharts() {
-    if (!splitCharts) {
+    console.log('updateCharts called - showMean:', showMean, 'showMedian:', showMedian, 'showTotal:', showTotal, 'showAverage:', showAverage, 'splitCharts:', splitCharts);
+    console.log('chartDataA exists:', !!chartDataA, 'currentExperimentA:', currentExperimentA);
+    
+    // Always rebuild Chart A if we have stored data (works for both overlay and split modes)
+    if (chartDataA) {
+        console.log('Rebuilding Chart A with stored data and toggle states');
+        updateChart('A', chartDataA.data, chartDataA.devices, chartDataA.stats, chartDataA.experiment);
+    } else if (!splitCharts && currentExperimentA) {
         // Overlay mode: rebuild overlay chart
+        console.log('Rebuilding overlay chart...');
         updateOverlayChart();
-    } else {
+    } else if (splitCharts) {
         // Split mode: rebuild both charts with existing data if available
-        if (chartDataA) {
-            updateChart('A', chartDataA.data, chartDataA.devices, chartDataA.stats, chartDataA.experiment);
-        } else if (currentExperimentA && currentGroupsA.length > 0) {
+        console.log('Rebuilding split charts...');
+        if (currentExperimentA && currentGroupsA.length > 0) {
+            console.log('Loading Chart A from server');
             loadChartData('A');
         }
         
         if (chartDataB) {
+            console.log('Rebuilding Chart B with stored data');
             updateChart('B', chartDataB.data, chartDataB.devices, chartDataB.stats, chartDataB.experiment);
         } else if (currentExperimentB && currentGroupsB.length > 0) {
+            console.log('Loading Chart B from server');
             loadChartData('B');
         }
     }
@@ -1453,14 +1534,23 @@ function toggleOverlay() {
 
 // Update overlay chart (combines A and B)
 async function updateOverlayChart() {
-    if (!currentExperimentA || !chartA) return;
+    console.log('updateOverlayChart called - showMean:', showMean, 'showMedian:', showMedian, 'showTotal:', showTotal, 'showAverage:', showAverage);
+    
+    if (!currentExperimentA || !chartA) {
+        console.log('updateOverlayChart: Missing currentExperimentA or chartA');
+        return;
+    }
     
     const experimentA = experiments[currentExperimentA];
-    if (!experimentA) return;
+    if (!experimentA) {
+        console.log('updateOverlayChart: Experiment not found:', currentExperimentA);
+        return;
+    }
     
     // Use stored data if available (faster, especially for toggles)
     let dataA, dataB;
     if (chartDataA && chartDataA.data) {
+        console.log('updateOverlayChart: Using stored chartDataA');
         dataA = {
             data: chartDataA.data,
             devices: chartDataA.devices,
@@ -1472,12 +1562,18 @@ async function updateOverlayChart() {
             stats: chartDataB.stats
         } : null;
     } else {
+        console.log('updateOverlayChart: Loading data from server');
         // Fallback to loading from server
         dataA = await loadExperimentDataRaw('A', currentExperimentA);
         dataB = currentExperimentB ? await loadExperimentDataRaw('B', currentExperimentB) : null;
     }
     
-    if (!dataA || !dataA.data) return;
+    if (!dataA || !dataA.data) {
+        console.log('updateOverlayChart: No data available');
+        return;
+    }
+    
+    console.log('updateOverlayChart: Rebuilding chart with', dataA.data.length, 'data points');
     
     const datasets = [];
     const devicesA = dataA.devices || [];
@@ -1694,8 +1790,26 @@ async function updateOverlayChart() {
         }
     }
     
+    // Clear existing datasets completely before rebuilding
+    chartA.data.datasets = [];
+    chartA.update('none'); // Clear first
+    
+    // Set new datasets
     chartA.data.datasets = datasets;
-    chartA.update();
+    
+    // Add annotation markers for this experiment (as dots below timeline)
+    if (dataA && dataA.data) {
+        addAnnotationMarkers(chartA, experimentA.name || experimentA.id, dataA.data);
+        if (dataB && dataB.data && currentExperimentB) {
+            const experimentB = experiments[currentExperimentB];
+            if (experimentB) {
+                addAnnotationMarkers(chartA, experimentB.name || experimentB.id, dataB.data);
+            }
+        }
+    }
+    
+    // Force complete chart update
+    chartA.update('none'); // Use 'none' mode for faster updates without animation
     
     // Update title
     document.getElementById('chartATitle').textContent = !splitCharts 
