@@ -411,6 +411,32 @@ def calculate_energy_stats(data: List[Dict], devices: List[str]) -> Dict[str, fl
 
 
 # ============================================================================
+# Health Check Endpoint
+# ============================================================================
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for monitoring"""
+    try:
+        # Try to connect to database to verify service is healthy
+        conn = get_db_connection()
+        if conn:
+            conn.close()
+        return JSONResponse(content={
+            "status": "healthy",
+            "service": "stats-admin",
+            "timestamp": datetime.now().isoformat()
+        })
+    except Exception as e:
+        # Even if DB fails, service is up
+        return JSONResponse(content={
+            "status": "healthy",
+            "service": "stats-admin",
+            "timestamp": datetime.now().isoformat(),
+            "note": "Database connection check failed but service is running"
+        }, status_code=200)
+
+# ============================================================================
 # Routes - HTML Pages
 # ============================================================================
 
