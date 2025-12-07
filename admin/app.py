@@ -223,6 +223,7 @@ def get_available_devices() -> List[str]:
         conn = get_db_connection()
         cursor = conn.cursor()
         
+        # First try last 24 hours, if no results, try last 7 days
         query = """
         SELECT DISTINCT alias 
         FROM gos_rem 
@@ -231,6 +232,18 @@ def get_available_devices() -> List[str]:
         """
         cursor.execute(query)
         devices = [row[0] for row in cursor.fetchall()]
+        
+        # If no devices in last 24 hours, look back 7 days
+        if not devices:
+            query = """
+            SELECT DISTINCT alias 
+            FROM gos_rem 
+            WHERE time >= NOW() - INTERVAL '7 days'
+            ORDER BY alias
+            """
+            cursor.execute(query)
+            devices = [row[0] for row in cursor.fetchall()]
+        
         cursor.close()
         conn.close()
         return sorted(devices)
