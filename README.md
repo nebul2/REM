@@ -9,6 +9,7 @@ A Docker-based system for collecting real-time power consumption data from TP-Li
 ## Quick Links
 
 - **[Simple Deployment Guide](#simple-deployment-guide)** - Step-by-step setup for non-technical users
+- **[User Guide](docs/USER_GUIDE.md)** - Complete guide to using the GOS REM Data Exploration Tool
 - **[Documentation](docs/)** - All development notes and detailed guides
 - **[Project Plan](docs/PROJECT_PLAN.md)** - Detailed implementation plan and architecture
 
@@ -508,16 +509,45 @@ TBD - To be determined with GOS team
 
 ---
 
-**Last Updated**: 2025-12-06  
-**Version**: 1.0.0 (Initial Release)  
+**Last Updated**: 2025-12-08  
+**Version**: 1.1.0  
 **Status**: ✅ Operational and Deployed on Pi400 (staging)  
 **Documentation**: All development notes and guides are in the [`docs/`](docs/) folder
 
 ---
 
-## Release Notes - v1.0.0 (Initial Release)
+## Release Notes
 
-### What's New
+### v1.1.0 (Current Release - 2025-12-08)
+
+#### What's New
+- ✅ **Improved Error Handling**: Better timeout management and error messages for large queries
+- ✅ **Smart Aggregation**: Automatic interval adjustment based on time range and device count
+- ✅ **Query Optimization**: Faster queries for large datasets (>50k points)
+- ✅ **Enhanced Time Range**: Added 7-day and 30-day lookback options
+- ✅ **Live Updates**: Auto-refreshing charts with pause/resume controls
+- ✅ **Fixed Time Range & Aggregation**: Dropdowns now properly reload charts
+- ✅ **Better Error Messages**: Clear feedback for timeouts and API errors
+
+#### Bug Fixes
+- Fixed 502/504 timeout errors for large time ranges
+- Fixed time range dropdown not updating charts
+- Fixed aggregation dropdown not applying changes
+- Fixed JSON parsing errors on failed requests
+- Fixed MutationObserver errors in Chart.js
+- Fixed database password configuration issues
+
+#### Technical Improvements
+- Added 5-minute query timeout handling
+- Optimized time bucket generation for large datasets
+- Improved fetch error handling with proper JSON parsing
+- Added request abort controllers for timeout management
+
+---
+
+### v1.0.0 (Initial Release - 2025-12-06)
+
+#### What's New
 - ✅ Complete Docker-based containerization
 - ✅ Migration from InfluxDB to TimescaleDB (PostgreSQL extension)
 - ✅ GOS REM Data Exploration Tool with interactive charts
@@ -527,10 +557,7 @@ TBD - To be determined with GOS team
 - ✅ Default chart loading with all devices
 - ✅ Full GoS branding with logo and colors
 
-### Known Issues
-- None at this time
-
-### Migration Notes
+#### Migration Notes
 - Legacy InfluxDB data can be migrated using forward-fill script
 - Old native InfluxDB/Grafana installation on Pi400 has been decommissioned
 

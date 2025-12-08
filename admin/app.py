@@ -82,7 +82,9 @@ def get_db_connection():
             port=POSTGRES_PORT,
             database=POSTGRES_DB,
             user=POSTGRES_USER,
-            password=POSTGRES_PASSWORD
+            password=POSTGRES_PASSWORD,
+            connect_timeout=10,
+            options="-c statement_timeout=300000"  # 5 minute query timeout
         )
         return conn
     except Exception as e:
@@ -275,8 +277,9 @@ def query_power_data(devices: List[str], start_time: str, end_time: str, interva
         """
         
         # Convert interval to TimescaleDB format (e.g., '1 minute')
-        # Assuming interval is like '1m', '5m', '1h'
+        # Supporting intervals like '10s', '30s', '1m', '5m', '1h'
         interval_map = {
+            "10s": "10 seconds", "30s": "30 seconds",
             "1m": "1 minute", "5m": "5 minutes", "15m": "15 minutes",
             "30m": "30 minutes", "1h": "1 hour", "6h": "6 hours",
             "12h": "12 hours", "1d": "1 day"
@@ -312,11 +315,15 @@ def query_power_data(devices: List[str], start_time: str, end_time: str, interva
         import re
         
         # Parse interval to generate all expected buckets
-        interval_match = re.match(r'(\d+)([mhd])', interval.lower())
+        num = 1
+        unit = 'm'
+        interval_match = re.match(r'(\d+)([smhd])', interval.lower())
         if interval_match:
             num = int(interval_match.group(1))
             unit = interval_match.group(2)
-            if unit == 'm':
+            if unit == 's':
+                bucket_delta = timedelta(seconds=num)
+            elif unit == 'm':
                 bucket_delta = timedelta(minutes=num)
             elif unit == 'h':
                 bucket_delta = timedelta(hours=num)
@@ -327,36 +334,148 @@ def query_power_data(devices: List[str], start_time: str, end_time: str, interva
         else:
             bucket_delta = timedelta(minutes=1)
         
-        # Generate all expected time buckets from start to end
-        expected_timestamps = []
-        current_time = start_dt
-        while current_time <= end_dt:
-            # Round to bucket boundary (TimescaleDB does this automatically)
-            bucket_start = current_time.replace(second=0, microsecond=0)
-            expected_timestamps.append(bucket_start.isoformat())
-            current_time += bucket_delta
+        # Estimate number of data points to decide if we should generate all buckets
+        time_range_seconds = (end_dt - start_dt).total_seconds()
+        bucket_seconds = bucket_delta.total_seconds()
+        estimated_buckets = int(time_range_seconds / bucket_seconds) if bucket_seconds > 0 else 0
+        total_estimated_points = estimated_buckets * len(device_data.keys()) if device_data else 0
         
-        # Organize existing data by timestamp
-        existing_by_timestamp = {}
-        for device, points in device_data.items():
-            for point in points:
-                ts = point["timestamp"]
-                if ts not in existing_by_timestamp:
-                    existing_by_timestamp[ts] = {}
-                existing_by_timestamp[ts][device] = point["value"]
-        
-        # Create data points for ALL expected time buckets (including empty ones)
-        for ts in expected_timestamps:
-            point = {"timestamp": ts}
-            # Add data for all devices (None if missing)
-            for device in device_data.keys():
-                if ts in existing_by_timestamp and device in existing_by_timestamp[ts]:
-                    point[device] = existing_by_timestamp[ts][device]
-                else:
-                    point[device] = None
+        # Only generate all time buckets for small datasets (< 50k points) to avoid memory/timeout issues
+        # For large datasets, just return the data that exists (no forward-fill)
+        if total_estimated_points < 50000:
+            # Generate all expected time buckets from start to end
+            # Align to proper interval boundaries (e.g., for 5m intervals: :00, :05, :10, etc.)
+            expected_timestamps = []
+            current_time = start_dt
             
-            # Include ALL time buckets (even if empty) so forward-fill can work
-            data_points.append(point)
+            # Align start time to the nearest interval boundary
+            if unit == 's':
+                # For seconds, align to the second boundary
+                current_time = current_time.replace(microsecond=0)
+                # Round down to nearest interval boundary
+                seconds_offset = current_time.second % num
+                if seconds_offset > 0:
+                    current_time = current_time.replace(second=current_time.second - seconds_offset)
+            elif unit == 'm':
+                # For minutes, align to the minute boundary and then to interval
+                current_time = current_time.replace(second=0, microsecond=0)
+                # Round down to nearest interval boundary
+                minutes_offset = current_time.minute % num
+                if minutes_offset > 0:
+                    current_time = current_time.replace(minute=current_time.minute - minutes_offset)
+            elif unit == 'h':
+                # For hours, align to the hour boundary and then to interval
+                current_time = current_time.replace(minute=0, second=0, microsecond=0)
+                # Round down to nearest interval boundary
+                hours_offset = current_time.hour % num
+                if hours_offset > 0:
+                    current_time = current_time.replace(hour=current_time.hour - hours_offset)
+            elif unit == 'd':
+                # For days, align to midnight and then to interval
+                current_time = current_time.replace(hour=0, minute=0, second=0, microsecond=0)
+            
+            while current_time <= end_dt:
+                expected_timestamps.append(current_time.isoformat())
+                current_time += bucket_delta
+            
+            # Organize existing data by timestamp
+            # Normalize timestamps to ISO format for matching
+            existing_by_timestamp = {}
+            for device, points in device_data.items():
+                for point in points:
+                    # Normalize timestamp to ISO format (handle both formats from DB)
+                    ts_raw = point["timestamp"]
+                    if isinstance(ts_raw, str):
+                        # Parse and re-format to ensure consistent format
+                        try:
+                            ts_dt = datetime.fromisoformat(ts_raw.replace('Z', '+00:00'))
+                            ts = ts_dt.isoformat()
+                        except:
+                            ts = ts_raw
+                    else:
+                        ts = ts_raw.isoformat() if hasattr(ts_raw, 'isoformat') else str(ts_raw)
+                    
+                    if ts not in existing_by_timestamp:
+                        existing_by_timestamp[ts] = {}
+                    existing_by_timestamp[ts][device] = point["value"]
+            
+            # Create data points for ALL expected time buckets (including empty ones)
+            for ts in expected_timestamps:
+                # Normalize expected timestamp for comparison
+                ts_normalized = ts
+                if isinstance(ts, str):
+                    try:
+                        ts_dt = datetime.fromisoformat(ts.replace('Z', '+00:00'))
+                        ts_normalized = ts_dt.isoformat()
+                    except:
+                        ts_normalized = ts
+                
+                point = {"timestamp": ts_normalized}
+                # Add data for all devices (None if missing)
+                for device in device_data.keys():
+                    # Try exact match first, then try without microseconds/seconds for flexibility
+                    if ts_normalized in existing_by_timestamp and device in existing_by_timestamp[ts_normalized]:
+                        point[device] = existing_by_timestamp[ts_normalized][device]
+                    else:
+                        # Try matching with slightly different timestamp formats
+                        matched = False
+                        for db_ts in existing_by_timestamp.keys():
+                            # Compare timestamps (allow small differences in format)
+                            try:
+                                db_dt = datetime.fromisoformat(db_ts.replace('Z', '+00:00'))
+                                exp_dt = datetime.fromisoformat(ts_normalized.replace('Z', '+00:00'))
+                                if abs((db_dt - exp_dt).total_seconds()) < 60:  # Within 1 minute
+                                    if device in existing_by_timestamp[db_ts]:
+                                        point[device] = existing_by_timestamp[db_ts][device]
+                                        matched = True
+                                        break
+                            except:
+                                pass
+                        
+                        if not matched:
+                            point[device] = None
+                
+                # Include ALL time buckets (even if empty) so forward-fill can work
+                data_points.append(point)
+        else:
+            # Large dataset: just return the data we have, organized by timestamp
+            all_timestamps = set()
+            for device, points in device_data.items():
+                for point in points:
+                    ts_raw = point["timestamp"]
+                    if isinstance(ts_raw, str):
+                        try:
+                            ts_dt = datetime.fromisoformat(ts_raw.replace('Z', '+00:00'))
+                            all_timestamps.add(ts_dt.isoformat())
+                        except:
+                            all_timestamps.add(ts_raw)
+                    else:
+                        all_timestamps.add(ts_raw.isoformat() if hasattr(ts_raw, 'isoformat') else str(ts_raw))
+            
+            # Create data points only for timestamps that exist
+            for ts in sorted(all_timestamps):
+                point = {"timestamp": ts}
+                for device in device_data.keys():
+                    # Find matching data point
+                    found_value = None
+                    for device_points in device_data[device]:
+                        device_ts = device_points["timestamp"]
+                        if isinstance(device_ts, str):
+                            try:
+                                device_ts_dt = datetime.fromisoformat(device_ts.replace('Z', '+00:00'))
+                                device_ts = device_ts_dt.isoformat()
+                            except:
+                                pass
+                        else:
+                            device_ts = device_ts.isoformat() if hasattr(device_ts, 'isoformat') else str(device_ts)
+                        
+                        if device_ts == ts:
+                            found_value = device_points["value"]
+                            break
+                    
+                    point[device] = found_value
+                
+                data_points.append(point)
         
         return {
             "data": data_points,
@@ -920,6 +1039,36 @@ async def get_power_data(
     if not device_list:
         raise HTTPException(status_code=400, detail="At least one device is required")
     
+    # Validate time range and suggest better aggregation for large ranges
+    try:
+        start_dt = datetime.fromisoformat(start.replace('Z', '+00:00'))
+        end_dt = datetime.fromisoformat(end.replace('Z', '+00:00'))
+        time_range_hours = (end_dt - start_dt).total_seconds() / 3600
+        
+        # Auto-adjust interval for very large ranges to prevent timeouts
+        # Be more aggressive with auto-adjustment based on device count and time range
+        device_count = len(device_list)
+        data_points_estimate = (time_range_hours * 3600 / {"10s": 10, "30s": 30, "1m": 60, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "6h": 21600, "12h": 43200, "1d": 86400}.get(interval, 60)) * device_count
+        
+        # If estimated data points > 100k, force larger aggregation
+        if data_points_estimate > 100000:
+            if time_range_hours > 168:  # > 7 days
+                interval = "1h"
+            elif time_range_hours > 72:  # > 3 days
+                interval = "1h"
+            elif time_range_hours > 24:  # > 1 day
+                interval = "15m"
+            else:
+                interval = "5m"
+        elif time_range_hours > 168 and interval in ["10s", "30s", "1m", "5m", "15m"]:  # > 7 days
+            interval = "1h"
+        elif time_range_hours > 72 and interval in ["10s", "30s", "1m", "5m"]:  # > 3 days
+            interval = "15m"
+        elif time_range_hours > 24 and interval in ["10s", "30s", "1m"]:  # > 1 day
+            interval = "5m"
+    except:
+        pass  # If parsing fails, continue with original interval
+    
     try:
         result = query_power_data(device_list, start, end, interval)
         stats = calculate_energy_stats(result["data"], result["devices"])
@@ -928,10 +1077,13 @@ async def get_power_data(
             "success": True,
             "data": result["data"],
             "devices": result["devices"],
-            "stats": stats
+            "stats": stats,
+            "actual_interval": interval  # Return the actual interval used
         })
     except Exception as e:
         print(f"Error in get_power_data: {e}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 

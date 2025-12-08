@@ -25,6 +25,8 @@ let chartDataA = null; // {data, devices, stats, experiment}
 let chartDataB = null;
 let splitCharts = false; // false = overlay mode (default), true = split mode
 let curveType = 'smooth'; // Options: 'linear', 'smooth', 'monotone', 'step', 'stepped-after'
+let autoUpdate = true; // Auto-update chart with new data (default: enabled)
+let updateInterval = null; // Store the auto-update interval
 
 // Colors for device lines
 const deviceColors = [
@@ -60,7 +62,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (allDevices.length > 0) {
             setTimeout(() => {
                 loadDefaultChart();
+                // Start auto-update after initial chart loads
+                startAutoUpdate();
             }, 500);
+        } else {
+            // Start auto-update even if no devices yet
+            startAutoUpdate();
         }
     } catch (error) {
         console.error('Initialization error:', error);
@@ -132,6 +139,17 @@ function setupEventListeners() {
         currentExperimentA = e.target.value;
         if (currentExperimentA) {
             populateGroupsForChart('A', currentExperimentA);
+            // If it's a current experiment without a start time, set it to now
+            const experiment = experiments[currentExperimentA];
+            if (experiment && experiment.is_current) {
+                if (!experiment.time_range || !experiment.time_range.start) {
+                    // Auto-set start time to now for current experiments
+                    if (!experiment.time_range) experiment.time_range = {};
+                    experiment.time_range.start = new Date().toISOString();
+                    // Update experiment in backend
+                    updateExperimentStartTime(currentExperimentA, experiment.time_range.start);
+                }
+            }
             // Auto-set time range if experiment has a time range
             autoSetTimeRangeForExperiment(currentExperimentA);
             // Load data after groups are populated (use setTimeout to ensure groups are set)
@@ -163,6 +181,17 @@ function setupEventListeners() {
             populateGroupsForChart('B', currentExperimentB);
             // Auto-set time range if experiment has a time range
             autoSetTimeRangeForExperiment(currentExperimentB);
+            // If it's a current experiment without a start time, set it to now
+            const experiment = experiments[currentExperimentB];
+            if (experiment && experiment.is_current) {
+                if (!experiment.time_range || !experiment.time_range.start) {
+                    // Auto-set start time to now for current experiments
+                    if (!experiment.time_range) experiment.time_range = {};
+                    experiment.time_range.start = new Date().toISOString();
+                    // Update experiment in backend
+                    updateExperimentStartTime(currentExperimentB, experiment.time_range.start);
+                }
+            }
             // Load data after groups are populated (use setTimeout to ensure groups are set)
             setTimeout(() => {
                 if (currentGroupsB.length > 0) {
@@ -186,13 +215,31 @@ function setupEventListeners() {
     });
     
     document.getElementById('timeRange').addEventListener('change', (e) => {
-        currentTimeRange = e.target.value;
+        const newTimeRange = e.target.value;
+        currentTimeRange = newTimeRange;
+        console.log(`Time range changed to: ${currentTimeRange}`);
+        
         if (currentTimeRange === 'custom') {
             document.getElementById('customRange').style.display = 'flex';
         } else {
             document.getElementById('customRange').style.display = 'none';
-            if (currentExperimentA && currentGroupsA.length > 0) loadChartData('A');
-            if (currentExperimentB && currentGroupsB.length > 0) loadChartData('B');
+            // Always reload charts when time range changes (if data exists)
+            // Check for default chart first (by ID or by checking if allDevices are loaded)
+            const isDefaultChart = chartDataA && chartDataA.experiment && chartDataA.experiment.id === 'all-devices';
+            if (isDefaultChart) {
+                // Reload default chart with new time range (don't call loadDefaultChart which resets to 1h)
+                console.log('Reloading default chart with new time range...');
+                reloadDefaultChartWithCurrentTimeRange();
+            } else if (currentExperimentA && currentGroupsA.length > 0) {
+                console.log('Reloading Chart A with new time range...');
+                loadChartData('A');
+            } else {
+                console.warn('No chart to reload - currentExperimentA:', currentExperimentA, 'chartDataA:', !!chartDataA);
+            }
+            if (splitCharts && currentExperimentB && currentGroupsB.length > 0) {
+                console.log('Reloading Chart B with new time range...');
+                loadChartData('B');
+            }
         }
     });
     
@@ -203,8 +250,24 @@ function setupEventListeners() {
     
     document.getElementById('aggregation').addEventListener('change', (e) => {
         currentAggregation = e.target.value;
-        if (currentExperimentA && currentGroupsA.length > 0) loadChartData('A');
-        if (currentExperimentB && currentGroupsB.length > 0) loadChartData('B');
+        console.log(`Aggregation changed to: ${currentAggregation}`);
+        // Always reload charts when aggregation changes (if data exists)
+        // Check for default chart first
+        const isDefaultChart = chartDataA && chartDataA.experiment && chartDataA.experiment.id === 'all-devices';
+        if (isDefaultChart) {
+            // Reload default chart with current time range
+            console.log('Reloading default chart with new aggregation...');
+            reloadDefaultChartWithCurrentTimeRange();
+        } else if (currentExperimentA && currentGroupsA.length > 0) {
+            console.log('Reloading Chart A with new aggregation...');
+            loadChartData('A');
+        } else {
+            console.warn('No chart to reload - currentExperimentA:', currentExperimentA, 'chartDataA:', !!chartDataA);
+        }
+        if (splitCharts && currentExperimentB && currentGroupsB.length > 0) {
+            console.log('Reloading Chart B with new aggregation...');
+            loadChartData('B');
+        }
     });
     
     document.getElementById('curveType').addEventListener('change', (e) => {
@@ -278,6 +341,12 @@ function setupEventListeners() {
         splitCharts = e.target.checked;
         toggleOverlay();
     });
+    
+    // Auto-update toggle button
+    const autoUpdateBtn = document.getElementById('autoUpdateBtn');
+    if (autoUpdateBtn) {
+        autoUpdateBtn.addEventListener('click', toggleAutoUpdate);
+    }
     
     // Buttons
     document.getElementById('addAnnotationBtn').addEventListener('click', () => {
@@ -598,6 +667,12 @@ function getTimeRange() {
         case '24h':
             start = new Date(now - 24 * 60 * 60 * 1000);
             break;
+        case '7d':
+            start = new Date(now - 7 * 24 * 60 * 60 * 1000);
+            break;
+        case '30d':
+            start = new Date(now - 30 * 24 * 60 * 60 * 1000);
+            break;
         default:
             start = new Date(now - 60 * 60 * 1000);
     }
@@ -609,22 +684,31 @@ function getTimeRange() {
 }
 
 // Auto-set time range based on experiment
+// Only auto-sets if user hasn't manually selected a specific time range
 function autoSetTimeRangeForExperiment(experimentId) {
     const experiment = experiments[experimentId];
     if (!experiment) return;
+    
+    const timeRangeSelect = document.getElementById('timeRange');
+    if (!timeRangeSelect) return;
+    
+    // Don't override if user has manually selected a specific time range
+    const currentValue = timeRangeSelect.value;
+    const manualRanges = ['15m', '1h', '6h', '24h', '7d', '30d', 'custom'];
+    if (manualRanges.includes(currentValue)) {
+        // User has manually selected a range - don't override
+        return;
+    }
     
     const timeRange = experiment.time_range || {};
     const isCurrent = experiment.is_current || false;
     
     // If experiment has a time range and is not current, use it
     if (!isCurrent && timeRange.start && timeRange.end) {
-        const timeRangeSelect = document.getElementById('timeRange');
-        if (timeRangeSelect) {
-            timeRangeSelect.value = 'experiment';
-            currentTimeRange = 'experiment';
-            // Hide custom range inputs
-            document.getElementById('customRange').style.display = 'none';
-        }
+        timeRangeSelect.value = 'experiment';
+        currentTimeRange = 'experiment';
+        // Hide custom range inputs
+        document.getElementById('customRange').style.display = 'none';
     }
 }
 
@@ -670,8 +754,14 @@ async function loadChartData(side) {
     let timeRange;
     const isCurrent = experiment.is_current || false;
     const timeRangeSelect = document.getElementById('timeRange');
+    // Always use the actual dropdown value, not the cached variable
     const selectedTimeRange = timeRangeSelect ? timeRangeSelect.value : currentTimeRange;
     const useExperimentRange = selectedTimeRange === 'experiment';
+    
+    // Update currentTimeRange to match the dropdown
+    if (selectedTimeRange !== currentTimeRange) {
+        currentTimeRange = selectedTimeRange;
+    }
     
     if (useExperimentRange && experiment.time_range) {
         const expTimeRange = experiment.time_range;
@@ -692,21 +782,62 @@ async function loadChartData(side) {
             timeRange = getTimeRange();
         }
     } else {
-        // Use time range selector - make sure we use the actual dropdown value
-        if (selectedTimeRange !== currentTimeRange) {
-            currentTimeRange = selectedTimeRange;
-        }
+        // Use time range selector - use getTimeRange which reads from currentTimeRange
         timeRange = getTimeRange();
     }
+    
+    console.log(`Loading Chart ${side} with time range:`, selectedTimeRange, timeRange);
     
     try {
         const devicesParam = uniqueDevices.join(',');
         const url = `/api/data/power?devices=${encodeURIComponent(devicesParam)}&start=${encodeURIComponent(timeRange.start)}&end=${encodeURIComponent(timeRange.end)}&interval=${currentAggregation}`;
         
-        const response = await fetch(url);
+        // Add timeout to fetch
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minute timeout
+        
+        const response = await fetch(url, { signal: controller.signal });
+        clearTimeout(timeoutId);
+        
+        if (!response.ok) {
+            let errorText = '';
+            try {
+                const contentType = response.headers.get('content-type');
+                if (contentType && contentType.includes('application/json')) {
+                    errorText = await response.json();
+                    errorText = errorText.detail || errorText.message || JSON.stringify(errorText);
+                } else {
+                    errorText = await response.text();
+                    // If it's a short HTML error page, extract meaningful text
+                    if (errorText.includes('<') && errorText.length < 500) {
+                        const match = errorText.match(/<title>(.*?)<\/title>/i) || errorText.match(/>([^<]{20,200})</);
+                        if (match) errorText = match[1];
+                    }
+                }
+            } catch (e) {
+                errorText = response.statusText || 'Unknown error';
+            }
+            
+            // Provide helpful messages for common errors
+            if (response.status === 502 || response.status === 504) {
+                throw new Error(`Server timeout (${response.status}). Try a larger aggregation interval or shorter time range.`);
+            } else if (response.status === 500) {
+                throw new Error(`Server error: ${errorText}`);
+            } else {
+                throw new Error(`Error ${response.status}: ${errorText || response.statusText}`);
+            }
+        }
+        
         const result = await response.json();
         
         if (result.success && result.data) {
+            // If interval was auto-adjusted, update the UI
+            if (result.actual_interval && result.actual_interval !== currentAggregation) {
+                console.warn(`Interval auto-adjusted from ${currentAggregation} to ${result.actual_interval} for large time range`);
+                currentAggregation = result.actual_interval;
+                const aggSelect = document.getElementById('aggregation');
+                if (aggSelect) aggSelect.value = result.actual_interval;
+            }
             // Store experiment metadata with devices for later use
             const experimentWithDevices = {
                 ...experiment,
@@ -715,10 +846,97 @@ async function loadChartData(side) {
                 selected_groups: selectedGroups
             };
             updateChart(side, result.data, uniqueDevices, result.stats, experimentWithDevices);
+        } else {
+            throw new Error('Invalid response from server');
         }
     } catch (error) {
-        console.error(`Error loading chart ${side}:`, error);
-        alert(`Error loading chart: ${error.message}`);
+        if (error.name === 'AbortError') {
+            console.error(`Request timeout for chart ${side}`);
+            alert('Request timed out. Try a shorter time range or larger aggregation interval.');
+        } else {
+            console.error(`Error loading chart ${side}:`, error);
+            const errorMsg = error.message || 'Unknown error occurred';
+            alert(`Error loading chart: ${errorMsg}`);
+        }
+    }
+}
+
+// Reload default chart with current time range (for time range/aggregation changes)
+async function reloadDefaultChartWithCurrentTimeRange() {
+    if (allDevices.length === 0 || !chartDataA || !chartDataA.experiment || chartDataA.experiment.id !== 'all-devices') {
+        console.log('Cannot reload default chart - no data or not default chart');
+        return;
+    }
+    
+    const timeRange = getTimeRange();
+    const devicesParam = allDevices.join(',');
+    const url = `/api/data/power?devices=${encodeURIComponent(devicesParam)}&start=${encodeURIComponent(timeRange.start)}&end=${encodeURIComponent(timeRange.end)}&interval=${currentAggregation}`;
+    
+    console.log(`Reloading default chart with time range: ${currentTimeRange}, aggregation: ${currentAggregation}`);
+    
+    try {
+        // Add timeout to fetch
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minute timeout
+        
+        const response = await fetch(url, { signal: controller.signal });
+        clearTimeout(timeoutId);
+        
+        if (!response.ok) {
+            let errorText = '';
+            try {
+                const contentType = response.headers.get('content-type');
+                if (contentType && contentType.includes('application/json')) {
+                    errorText = await response.json();
+                    errorText = errorText.detail || errorText.message || JSON.stringify(errorText);
+                } else {
+                    errorText = await response.text();
+                    // If it's a short HTML error page, extract meaningful text
+                    if (errorText.includes('<') && errorText.length < 500) {
+                        const match = errorText.match(/<title>(.*?)<\/title>/i) || errorText.match(/>([^<]{20,200})</);
+                        if (match) errorText = match[1];
+                    }
+                }
+            } catch (e) {
+                errorText = response.statusText || 'Unknown error';
+            }
+            
+            // Provide helpful messages for common errors
+            if (response.status === 502 || response.status === 504) {
+                throw new Error(`Server timeout (${response.status}). Try a larger aggregation interval or shorter time range.`);
+            } else if (response.status === 500) {
+                throw new Error(`Server error: ${errorText}`);
+            } else {
+                throw new Error(`Error ${response.status}: ${errorText || response.statusText}`);
+            }
+        }
+        
+        const result = await response.json();
+        
+        if (result.success && result.data) {
+            // If interval was auto-adjusted, update the UI
+            if (result.actual_interval && result.actual_interval !== currentAggregation) {
+                console.warn(`Interval auto-adjusted from ${currentAggregation} to ${result.actual_interval} for large time range`);
+                currentAggregation = result.actual_interval;
+                const aggSelect = document.getElementById('aggregation');
+                if (aggSelect) aggSelect.value = result.actual_interval;
+            }
+            // Update chart with new data using the existing experiment object
+            updateChart('A', result.data, allDevices, result.stats, chartDataA.experiment);
+            console.log(`Default chart reloaded with ${currentTimeRange} time range and ${currentAggregation} aggregation`);
+        } else {
+            console.error('Failed to reload default chart:', result);
+            throw new Error('Invalid response from server');
+        }
+    } catch (error) {
+        if (error.name === 'AbortError') {
+            console.error('Request timeout after 5 minutes');
+            alert('Request timed out. Try a shorter time range or larger aggregation interval.');
+        } else {
+            console.error('Error reloading default chart:', error);
+            const errorMsg = error.message || 'Unknown error occurred';
+            alert(`Error reloading chart: ${errorMsg}`);
+        }
     }
 }
 
@@ -729,14 +947,17 @@ async function loadDefaultChart() {
         return;
     }
     
-    console.log(`Loading default chart with ${allDevices.length} devices for last hour...`);
-    
-    // Set time range to 1h
-    currentTimeRange = '1h';
+    // Only set to 1h if this is the initial load (time range not manually selected)
     const timeRangeSelect = document.getElementById('timeRange');
-    if (timeRangeSelect) {
-        timeRangeSelect.value = '1h';
+    if (timeRangeSelect && (!timeRangeSelect.value || timeRangeSelect.value === '1h')) {
+        currentTimeRange = '1h';
+        if (timeRangeSelect) {
+            timeRangeSelect.value = '1h';
+        }
     }
+    
+    const selectedTimeRange = timeRangeSelect ? timeRangeSelect.value : currentTimeRange;
+    console.log(`Loading default chart with ${allDevices.length} devices for ${selectedTimeRange}...`);
     
     // Create a default experiment-like object for all devices
     const defaultExperiment = {
@@ -750,7 +971,7 @@ async function loadDefaultChart() {
         selected_groups: []
     };
     
-    // Get time range
+    // Get time range (will use current selection)
     const timeRange = getTimeRange();
     
     try {
@@ -772,8 +993,21 @@ async function loadDefaultChart() {
 
 // Initialize charts
 function initializeCharts() {
-    const ctxA = document.getElementById('chartA').getContext('2d');
-    const ctxB = document.getElementById('chartB').getContext('2d');
+    const canvasA = document.getElementById('chartA');
+    const canvasB = document.getElementById('chartB');
+    
+    if (!canvasA || !canvasB) {
+        console.error('Chart canvas elements not found');
+        return;
+    }
+    
+    const ctxA = canvasA.getContext('2d');
+    const ctxB = canvasB.getContext('2d');
+    
+    if (!ctxA || !ctxB) {
+        console.error('Failed to get 2D context from canvas elements');
+        return;
+    }
     
     const chartConfig = {
         type: 'line',
@@ -967,7 +1201,16 @@ function updateChart(side, data, devices, stats, experiment) {
     const meanEl = document.getElementById(`mean${side}`);
     const medianEl = document.getElementById(`median${side}`);
     
-    if (!chart) return;
+    if (!chart) {
+        console.error(`Chart ${side} does not exist`);
+        return;
+    }
+    
+    console.log(`updateChart(${side}):`, {
+        dataPoints: data?.length || 0,
+        devices: devices?.length || 0,
+        hasStats: !!stats
+    });
     
     // Store chart data for recalculation
     if (side === 'A') {
@@ -1000,11 +1243,11 @@ function updateChart(side, data, devices, stats, experiment) {
     // Device datasets (only if showDevices is true)
     if (showDevices) {
         devices.forEach((device, index) => {
-            // Filter out null values for smoother lines
+            // Filter out null/undefined values but keep zeros (zeros are valid data)
             const deviceData = data
                 .map(point => ({
                     x: point.timestamp,
-                    y: point[device] || null
+                    y: point[device] !== null && point[device] !== undefined ? point[device] : null
                 }))
                 .filter(point => point.y !== null && point.y !== undefined);
             
@@ -2149,6 +2392,10 @@ document.addEventListener('keydown', function(event) {
 async function loadCollectorStatus() {
     try {
         const response = await fetch('/api/collector/status');
+        if (!response.ok) {
+            // Silently fail for collector status - don't spam console
+            return;
+        }
         const data = await response.json();
         
         // Update UI
@@ -2179,7 +2426,11 @@ async function loadCollectorStatus() {
             pollIntervalInput.value = data.poll_interval || 30;
         }
     } catch (error) {
-        console.error('Error loading collector status:', error);
+        // Silently fail for collector status - don't spam console
+        // Only log if it's not a network/timeout error
+        if (error.name !== 'TypeError' && !error.message.includes('Failed to fetch')) {
+            console.error('Error loading collector status:', error);
+        }
     }
 }
 
@@ -2252,3 +2503,144 @@ async function updatePollInterval(interval) {
     }
 }
 
+
+// ============================================================================
+// Auto-Update Functions
+// ============================================================================
+
+// Start auto-update interval (refreshes chart data every 30 seconds)
+function startAutoUpdate() {
+    if (updateInterval) {
+        clearInterval(updateInterval);
+    }
+    
+    // Update every 30 seconds (adjust as needed)
+    updateInterval = setInterval(() => {
+        if (autoUpdate) {
+            refreshCurrentCharts();
+        }
+    }, 30000); // 30 seconds
+    
+    console.log('Auto-update started (refreshes every 30 seconds)');
+}
+
+// Stop auto-update interval
+function stopAutoUpdate() {
+    if (updateInterval) {
+        clearInterval(updateInterval);
+        updateInterval = null;
+        console.log('Auto-update stopped');
+    }
+}
+
+// Toggle auto-update on/off
+function toggleAutoUpdate() {
+    autoUpdate = !autoUpdate;
+    const btn = document.getElementById('autoUpdateBtn');
+    
+    if (autoUpdate) {
+        btn.textContent = '⏸️ Pause Updates';
+        btn.title = 'Pause auto-updates to study current view';
+        startAutoUpdate();
+    } else {
+        btn.textContent = '▶️ Resume Updates';
+        btn.title = 'Resume auto-updates to see latest data';
+        stopAutoUpdate();
+    }
+}
+
+// Refresh current charts with latest data (only if auto-update is enabled)
+async function refreshCurrentCharts() {
+    if (!autoUpdate) return;
+    
+    // Only refresh if we have active charts
+    if (currentExperimentA && currentGroupsA.length > 0) {
+        console.log('Auto-refreshing Chart A...');
+        await loadChartData('A');
+        
+        // Auto-scroll to latest time
+        if (chartA && chartA.data.datasets.length > 0) {
+            autoScrollToLatest(chartA);
+        }
+    } else if (chartDataA && chartDataA.experiment && chartDataA.experiment.id === 'all-devices') {
+        // Default chart case - reload with current time range
+        console.log('Auto-refreshing default chart...');
+        await reloadDefaultChartWithCurrentTimeRange();
+        
+        // Auto-scroll to latest time
+        if (chartA && chartA.data.datasets.length > 0) {
+            autoScrollToLatest(chartA);
+        }
+    }
+    
+    if (splitCharts && currentExperimentB && currentGroupsB.length > 0) {
+        console.log('Auto-refreshing Chart B...');
+        await loadChartData('B');
+        
+        // Auto-scroll to latest time
+        if (chartB && chartB.data.datasets.length > 0) {
+            autoScrollToLatest(chartB);
+        }
+    }
+}
+
+// Auto-scroll chart to show the latest data point
+function autoScrollToLatest(chart) {
+    if (!chart || !chart.data.datasets || chart.data.datasets.length === 0) return;
+    
+    // Find the latest timestamp across all datasets
+    let latestTime = null;
+    chart.data.datasets.forEach(dataset => {
+        if (dataset.data && dataset.data.length > 0) {
+            dataset.data.forEach(point => {
+                if (point && point.x) {
+                    const time = new Date(point.x).getTime();
+                    if (!latestTime || time > latestTime) {
+                        latestTime = time;
+                    }
+                }
+            });
+        }
+    });
+    
+    if (!latestTime) return;
+    
+    // Get current scale limits
+    const xScale = chart.scales.x;
+    if (!xScale) return;
+    
+    // Calculate time range based on current view width
+    const currentMin = xScale.min;
+    const currentMax = xScale.max;
+    const viewWidth = currentMax - currentMin;
+    
+    // Set new limits to show latest data at the right edge
+    const newMax = latestTime;
+    const newMin = newMax - viewWidth;
+    
+    // Update chart scale limits
+    chart.options.scales.x.min = newMin;
+    chart.options.scales.x.max = newMax;
+    chart.update('none');
+}
+
+// Helper function to update experiment start time in backend
+async function updateExperimentStartTime(experimentId, startTime) {
+    try {
+        const formData = new FormData();
+        formData.append('start_time', startTime);
+        
+        const response = await fetch(`/api/experiments/${experimentId}`, {
+            method: 'PUT',
+            body: formData
+        });
+        
+        if (response.ok) {
+            console.log(`Auto-set start time for experiment ${experimentId} to ${startTime}`);
+        } else {
+            console.warn(`Failed to auto-set start time for experiment ${experimentId}`);
+        }
+    } catch (error) {
+        console.error('Error updating experiment start time:', error);
+    }
+}
