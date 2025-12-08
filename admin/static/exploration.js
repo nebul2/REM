@@ -888,6 +888,38 @@ async function loadChartData(side) {
 }
 
 // Reload default chart with current time range (for time range/aggregation changes)
+// Smart aggregation selection based on device count and time range
+function getSmartAggregation(timeRangeHours, deviceCount, requestedAggregation) {
+    // Estimate data points: (hours * 3600 / interval_seconds) * device_count
+    const intervalSeconds = {
+        '10s': 10, '30s': 30, '1m': 60, '5m': 300, '15m': 900, 
+        '30m': 1800, '1h': 3600, '6h': 21600, '12h': 43200, '1d': 86400
+    }[requestedAggregation] || 60;
+    
+    const estimatedPoints = (timeRangeHours * 3600 / intervalSeconds) * deviceCount;
+    
+    // If estimated points > 30k, auto-adjust to larger interval
+    // Also adjust if: many devices (>20) with >24h range using small intervals
+    if (estimatedPoints > 30000 || (timeRangeHours >= 24 && deviceCount > 20 && requestedAggregation === '1m')) {
+        if (timeRangeHours > 168) { // > 7 days
+            return '1h';
+        } else if (timeRangeHours > 72) { // > 3 days
+            return '15m';
+        } else if (timeRangeHours >= 24) { // >= 1 day
+            return '5m';
+        } else {
+            return '5m'; // Default for large device counts
+        }
+    }
+    
+    // Also handle edge case: 20+ devices with 24h+ and any small interval
+    if (timeRangeHours >= 24 && deviceCount > 20 && requestedAggregation in {'10s': true, '30s': true, '1m': true, '5m': true}) {
+        return '5m';
+    }
+    
+    return requestedAggregation;
+}
+
 async function reloadDefaultChartWithCurrentTimeRange() {
     if (allDevices.length === 0 || !chartDataA || !chartDataA.experiment || chartDataA.experiment.id !== 'all-devices') {
         console.log('Cannot reload default chart - no data or not default chart');
@@ -895,10 +927,19 @@ async function reloadDefaultChartWithCurrentTimeRange() {
     }
     
     const timeRange = getTimeRange();
-    const devicesParam = allDevices.join(',');
-    const url = `/api/data/power?devices=${encodeURIComponent(devicesParam)}&start=${encodeURIComponent(timeRange.start)}&end=${encodeURIComponent(timeRange.end)}&interval=${currentAggregation}`;
+    const timeRangeHours = (new Date(timeRange.end) - new Date(timeRange.start)) / (1000 * 60 * 60);
     
-    console.log(`Reloading default chart with time range: ${currentTimeRange}, aggregation: ${currentAggregation}`);
+    // Auto-adjust aggregation for large queries
+    const smartAggregation = getSmartAggregation(timeRangeHours, allDevices.length, currentAggregation);
+    
+    const devicesParam = allDevices.join(',');
+    const url = `/api/data/power?devices=${encodeURIComponent(devicesParam)}&start=${encodeURIComponent(timeRange.start)}&end=${encodeURIComponent(timeRange.end)}&interval=${smartAggregation}`;
+    
+    if (smartAggregation !== currentAggregation) {
+        console.log(`Auto-adjusted aggregation from ${currentAggregation} to ${smartAggregation} for ${timeRangeHours.toFixed(1)}h range with ${allDevices.length} devices`);
+    }
+    
+    console.log(`Reloading default chart with time range: ${currentTimeRange}, aggregation: ${smartAggregation}`);
     
     try {
         // Add timeout to fetch
@@ -961,7 +1002,15 @@ async function reloadDefaultChartWithCurrentTimeRange() {
         } else {
             console.error('Error reloading default chart:', error);
             const errorMsg = error.message || 'Unknown error occurred';
-            alert(`Error reloading chart: ${errorMsg}`);
+            // Only show alert for manual reloads, not auto-refresh
+            // Check if this is being called from auto-refresh by checking call stack
+            const isAutoRefresh = new Error().stack?.includes('refreshCurrentCharts') || 
+                                   new Error().stack?.includes('setInterval');
+            if (!isAutoRefresh) {
+                alert(`Error reloading chart: ${errorMsg}`);
+            } else {
+                console.warn('Auto-refresh error (silent):', errorMsg);
+            }
         }
     }
 }
@@ -1103,21 +1152,23 @@ function initializeCharts() {
                     zoom: {
                         wheel: {
                             enabled: true,
+                            speed: 0.1, // Slower zoom for better control
                         },
                         pinch: {
                             enabled: true
                         },
                         mode: 'x',
+                        // Enable zoom out with shift+wheel or right-click drag
+                        drag: {
+                            enabled: false // Disable drag zoom, use pan instead
+                        }
                     },
                     pan: {
                         enabled: true,
                         mode: 'x', // Pan horizontally (left-right)
-                        threshold: 10, // Minimum distance to start panning
-                        modifierKey: null, // No modifier key needed
-                        drag: {
-                            enabled: true, // Enable drag to pan
-                            modifierKey: null // No modifier key needed
-                        }
+                        threshold: 10, // Minimum pixels to move before panning starts
+                        modifierKey: null, // No modifier key needed for pan
+                        speed: 10, // Pan speed multiplier
                     },
                     limits: {
                         x: {min: 'original', max: 'original'}
@@ -2392,21 +2443,34 @@ function resetZoomForChart(chart) {
     if (!chart) return;
     
     // Use Chart.js zoom plugin resetZoom method if available
-    if (typeof chart.resetZoom === 'function') {
-        chart.resetZoom();
-    } else if (chart.chart && typeof chart.chart.resetZoom === 'function') {
-        chart.chart.resetZoom();
-    } else {
-        // Fallback: manually reset scales to original bounds
-        const xScale = chart.scales?.x;
-        if (xScale) {
-            // Reset to original min/max (undefined means use data range)
-            if (xScale.options) {
-                xScale.options.min = undefined;
-                xScale.options.max = undefined;
-            }
-            chart.update('none');
+    // The zoom plugin adds a resetZoom method to the chart instance
+    const zoomPlugin = chart.plugins?.find(p => p.id === 'zoom');
+    if (zoomPlugin && chart.resetZoom) {
+        try {
+            chart.resetZoom();
+        } catch (e) {
+            console.warn('resetZoom method failed, using fallback:', e);
+            resetZoomFallback(chart);
         }
+    } else {
+        resetZoomFallback(chart);
+    }
+}
+
+// Fallback zoom reset method
+function resetZoomFallback(chart) {
+    const xScale = chart.scales?.x;
+    if (xScale) {
+        // Reset to original min/max (undefined means use data range)
+        if (xScale.options) {
+            xScale.options.min = undefined;
+            xScale.options.max = undefined;
+        }
+        // Also clear any zoom state
+        if (chart.zoomScale) {
+            chart.zoomScale = undefined;
+        }
+        chart.update('none');
     }
 }
 
@@ -2635,9 +2699,19 @@ function toggleAutoUpdate() {
     }
 }
 
+// Track last successful refresh to avoid spam on failures
+let lastRefreshSuccess = true;
+let consecutiveFailures = 0;
+
 // Refresh current charts with latest data (only if auto-update is enabled)
 async function refreshCurrentCharts() {
     if (!autoUpdate) return;
+    
+    // If we've had too many consecutive failures, skip this refresh to avoid spam
+    if (!lastRefreshSuccess && consecutiveFailures > 2) {
+        console.log('Skipping auto-refresh - too many consecutive failures');
+        return;
+    }
     
     // Only refresh if we have active charts
     if (currentExperimentA && currentGroupsA.length > 0) {
@@ -2651,21 +2725,37 @@ async function refreshCurrentCharts() {
     } else if (chartDataA && chartDataA.experiment && chartDataA.experiment.id === 'all-devices') {
         // Default chart case - reload with current time range
         console.log('Auto-refreshing default chart...');
-        await reloadDefaultChartWithCurrentTimeRange();
-        
-        // Auto-scroll to latest time
-        if (chartA && chartA.data.datasets.length > 0) {
-            autoScrollToLatest(chartA);
+        try {
+            await reloadDefaultChartWithCurrentTimeRange();
+            
+            // Auto-scroll to latest time
+            if (chartA && chartA.data.datasets.length > 0) {
+                autoScrollToLatest(chartA);
+            }
+            lastRefreshSuccess = true;
+            consecutiveFailures = 0;
+        } catch (error) {
+            lastRefreshSuccess = false;
+            consecutiveFailures++;
+            console.warn(`Auto-refresh failed (${consecutiveFailures} consecutive):`, error);
+            // Don't show alert for auto-refresh failures to avoid spam
+        }
+            console.warn(`Auto-refresh failed (${consecutiveFailures} consecutive):`, error);
+            // Don't show alert for auto-refresh failures to avoid spam
         }
     }
     
     if (splitCharts && currentExperimentB && currentGroupsB.length > 0) {
         console.log('Auto-refreshing Chart B...');
-        await loadChartData('B');
-        
-        // Auto-scroll to latest time
-        if (chartB && chartB.data.datasets.length > 0) {
-            autoScrollToLatest(chartB);
+        try {
+            await loadChartData('B');
+            
+            // Auto-scroll to latest time
+            if (chartB && chartB.data.datasets.length > 0) {
+                autoScrollToLatest(chartB);
+            }
+        } catch (error) {
+            console.warn('Auto-refresh Chart B failed:', error);
         }
     }
 }
