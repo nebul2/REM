@@ -62,23 +62,24 @@
         <!-- Compact Controls Panel - BELOW CHARTS -->
         <section class="controls-panel compact-controls">
             <div class="control-group compact-group">
-                <label>Chart A:</label>
+                <label>Chart A (Primary):</label>
                 <select id="chartAExperiment" class="experiment-select">
                     <option value="">-- Select Experiment --</option>
                 </select>
-                <select id="chartAGroups" class="experiment-select" style="display: none; margin-left: 10px;" multiple>
+                <select id="chartAGroups" class="experiment-select" style="display: none; margin-left: 10px;" multiple title="Select one or more groups from the experiment to display">
                     <option value="">-- Select Groups --</option>
                 </select>
             </div>
             
             <div class="control-group compact-group">
-                <label>Chart B:</label>
+                <label>Chart B (Comparison):</label>
                 <select id="chartBExperiment" class="experiment-select">
-                    <option value="">-- Select Experiment --</option>
+                    <option value="">-- Select Experiment (optional) --</option>
                 </select>
-                <select id="chartBGroups" class="experiment-select" style="display: none; margin-left: 10px;" multiple>
+                <select id="chartBGroups" class="experiment-select" style="display: none; margin-left: 10px;" multiple title="Select one or more groups from the experiment to display">
                     <option value="">-- Select Groups --</option>
                 </select>
+                <small style="color: #666; font-size: 0.85rem; margin-left: 5px;">Enable "Split Charts" below to see A and B side-by-side, or leave unchecked to overlay B on A</small>
             </div>
             
             <div class="control-group compact-group">
@@ -101,9 +102,13 @@
             </div>
             
             <div class="control-group compact-group">
-                <button id="autoUpdateBtn" class="btn btn-primary" title="Pause auto-updates to study current view">
-                    ⏸️ Pause Updates
+                <button id="autoUpdateBtn" class="btn btn-primary" title="Pause chart auto-refresh to study current view (does not stop data collection from TP-Link devices)">
+                    ⏸️ Pause Chart Refresh
                 </button>
+                <button id="resetZoomBtn" class="btn btn-secondary" title="Reset zoom to original view (or double-click chart)">
+                    🔍 Reset Zoom
+                </button>
+                <small style="color: #666; font-size: 0.85rem; margin-left: 5px;">💡 Tip: Double-click chart to reset zoom | Scroll to zoom | Click+drag to pan</small>
             </div>
             
             <div class="control-group compact-group">
@@ -143,9 +148,9 @@
                     <input type="checkbox" id="showAverage" checked>
                     <span>Show Average</span>
                 </label>
-                <label class="toggle-label">
+                <label class="toggle-label" title="Split Charts: Show Chart A and Chart B side-by-side. Unchecked: Overlay Chart B on Chart A for comparison.">
                     <input type="checkbox" id="splitCharts">
-                    <span>Split Charts</span>
+                    <span>Split Charts (unchecked = overlay mode)</span>
                 </label>
             </div>
             

@@ -74,8 +74,8 @@ POSTGRES_USER = os.getenv("POSTGRES_USER", "gos")
 POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "")
 
 
-def get_db_connection():
-    """Get PostgreSQL/TimescaleDB connection"""
+def get_db_connection(timeout_seconds=300):
+    """Get PostgreSQL/TimescaleDB connection with configurable timeout"""
     try:
         conn = psycopg2.connect(
             host=POSTGRES_HOST,
@@ -84,7 +84,7 @@ def get_db_connection():
             user=POSTGRES_USER,
             password=POSTGRES_PASSWORD,
             connect_timeout=10,
-            options="-c statement_timeout=300000"  # 5 minute query timeout
+            options=f"-c statement_timeout={timeout_seconds * 1000}"  # Convert to milliseconds
         )
         return conn
     except Exception as e:
@@ -257,10 +257,11 @@ def get_available_devices() -> List[str]:
         return []
 
 
-def query_power_data(devices: List[str], start_time: str, end_time: str, interval: str = "1m") -> Dict[str, Any]:
-    """Query power consumption data from TimescaleDB"""
+def query_power_data(devices: List[str], start_time: str, end_time: str, interval: str = "1m", timeout_seconds: int = 120) -> Dict[str, Any]:
+    """Query power consumption data from TimescaleDB with configurable timeout"""
     try:
-        conn = get_db_connection()
+        # Use shorter timeout for very large queries to fail faster and provide better error messages
+        conn = get_db_connection(timeout_seconds=timeout_seconds)
         cursor = conn.cursor(cursor_factory=RealDictCursor)
         
         query = """
@@ -1048,24 +1049,39 @@ async def get_power_data(
         # Auto-adjust interval for very large ranges to prevent timeouts
         # Be more aggressive with auto-adjustment based on device count and time range
         device_count = len(device_list)
-        data_points_estimate = (time_range_hours * 3600 / {"10s": 10, "30s": 30, "1m": 60, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "6h": 21600, "12h": 43200, "1d": 86400}.get(interval, 60)) * device_count
+        interval_seconds_map = {"10s": 10, "30s": 30, "1m": 60, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "6h": 21600, "12h": 43200, "1d": 86400}
+        requested_interval_seconds = interval_seconds_map.get(interval, 60)
+        data_points_estimate = (time_range_hours * 3600 / requested_interval_seconds) * device_count
         
-        # If estimated data points > 100k, force larger aggregation
-        if data_points_estimate > 100000:
-            if time_range_hours > 168:  # > 7 days
+        # More aggressive auto-adjustment - force larger intervals earlier
+        original_interval = interval
+        if time_range_hours > 168:  # > 7 days
+            if interval in ["10s", "30s", "1m", "5m", "15m", "30m"]:
                 interval = "1h"
-            elif time_range_hours > 72:  # > 3 days
+        elif time_range_hours > 72:  # > 3 days
+            if interval in ["10s", "30s", "1m", "5m"]:
+                interval = "15m"
+            elif interval in ["15m", "30m"]:
                 interval = "1h"
-            elif time_range_hours > 24:  # > 1 day
+        elif time_range_hours > 24:  # > 1 day
+            if interval in ["10s", "30s", "1m"]:
+                interval = "5m"
+            elif interval in ["5m"]:
+                interval = "15m"
+        
+        # If estimated data points > 50k, force larger aggregation
+        if data_points_estimate > 50000:
+            if time_range_hours > 168:
+                interval = "1h"
+            elif time_range_hours > 72:
+                interval = "1h"
+            elif time_range_hours > 24:
                 interval = "15m"
             else:
                 interval = "5m"
-        elif time_range_hours > 168 and interval in ["10s", "30s", "1m", "5m", "15m"]:  # > 7 days
-            interval = "1h"
-        elif time_range_hours > 72 and interval in ["10s", "30s", "1m", "5m"]:  # > 3 days
-            interval = "15m"
-        elif time_range_hours > 24 and interval in ["10s", "30s", "1m"]:  # > 1 day
-            interval = "5m"
+        
+        if interval != original_interval:
+            print(f"Auto-adjusted interval from {original_interval} to {interval} for time range {time_range_hours:.1f} hours with {device_count} devices")
     except:
         pass  # If parsing fails, continue with original interval
     
@@ -1081,10 +1097,25 @@ async def get_power_data(
             "actual_interval": interval  # Return the actual interval used
         })
     except Exception as e:
+        error_msg = str(e)
         print(f"Error in get_power_data: {e}")
         import traceback
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        
+        # Check if it's a timeout-related error
+        if "timeout" in error_msg.lower() or "gateway" in error_msg.lower() or "502" in error_msg or "504" in error_msg:
+            # Try to get the time range info for better error message
+            try:
+                start_dt = datetime.fromisoformat(start.replace('Z', '+00:00'))
+                end_dt = datetime.fromisoformat(end.replace('Z', '+00:00'))
+                time_range_hours = (end_dt - start_dt).total_seconds() / 3600
+                suggested_interval = "1h" if time_range_hours > 72 else "15m" if time_range_hours > 24 else "5m"
+                error_detail = f"Server timeout. Try a larger aggregation interval (e.g., {suggested_interval}) or shorter time range (currently {time_range_hours:.1f} hours)."
+            except:
+                error_detail = "Server timeout. Try a larger aggregation interval or shorter time range."
+            raise HTTPException(status_code=502, detail=error_detail)
+        else:
+            raise HTTPException(status_code=500, detail=f"Failed to load data: {error_msg}")
 
 
 # ============================================================================

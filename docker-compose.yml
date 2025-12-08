@@ -14,7 +14,7 @@ services:
       - ./scripts/init-timescaledb.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
-    restart: unless-stopped
+    restart: always
     networks:
       - stats-network
     healthcheck:
@@ -52,15 +52,15 @@ services:
     depends_on:
       timescaledb:
         condition: service_healthy
-    restart: unless-stopped
+    restart: always
     networks:
       - stats-network
     healthcheck:
-      test: ["CMD", "pgrep", "-f", "collector.py"]
+      test: ["CMD", "python", "-c", "import os; pids = [pid for pid in os.listdir('/proc') if pid.isdigit()]; cmdlines = [open(f'/proc/{pid}/cmdline', 'rb').read().decode('utf-8', errors='ignore').replace(chr(0), ' ') for pid in pids if os.path.exists(f'/proc/{pid}/cmdline')]; exit(0 if any('collector.py' in cmd for cmd in cmdlines) else 1)"]
       interval: 30s
       timeout: 10s
-      retries: 3
-      start_period: 10s
+      retries: 5
+      start_period: 30s
 
   grafana:
     image: grafana/grafana:10.4.2
@@ -81,14 +81,15 @@ services:
         condition: service_healthy
       admin:
         condition: service_started
-    restart: unless-stopped
+    restart: always
     networks:
       - stats-network
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/api/health"]
       interval: 10s
       timeout: 5s
-      retries: 3
+      retries: 5
+      start_period: 30s
 
   admin:
     build:
@@ -110,7 +111,7 @@ services:
     depends_on:
       timescaledb:
         condition: service_healthy
-    restart: unless-stopped
+    restart: always
     networks:
       - stats-network
       # Uncomment the next line if using Traefik reverse proxy
@@ -126,10 +127,11 @@ services:
     #   - "traefik.http.middlewares.stats-auth.basicauth.usersfile=/etc/traefik/auth/users.txt"
     #   - "traefik.docker.network=traefik-network"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:7001/api/devices"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:7001/api/devices').read()"]
       interval: 30s
       timeout: 10s
-      retries: 3
+      retries: 5
+      start_period: 30s
 
 volumes:
   collector-data:

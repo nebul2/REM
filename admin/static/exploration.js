@@ -348,6 +348,24 @@ function setupEventListeners() {
         autoUpdateBtn.addEventListener('click', toggleAutoUpdate);
     }
     
+    // Reset zoom button
+    const resetZoomBtn = document.getElementById('resetZoomBtn');
+    if (resetZoomBtn) {
+        resetZoomBtn.addEventListener('click', resetZoom);
+    }
+    
+    // Double-click on charts to reset zoom
+    if (document.getElementById('chartA')) {
+        document.getElementById('chartA').addEventListener('dblclick', () => {
+            if (chartA) resetZoomForChart(chartA);
+        });
+    }
+    if (document.getElementById('chartB')) {
+        document.getElementById('chartB').addEventListener('dblclick', () => {
+            if (chartB) resetZoomForChart(chartB);
+        });
+    }
+    
     // Buttons
     document.getElementById('addAnnotationBtn').addEventListener('click', () => {
         openModal('addAnnotationModal');
@@ -465,14 +483,22 @@ function populateExperimentSelects() {
         snapshotSelect.innerHTML = '<option value="">-- Select Experiment --</option>';
     }
     
+    // Only show experiments, NOT groups (fixes issue #7)
     for (const [experimentId, exp] of Object.entries(experiments)) {
+        // Skip if this is actually a group (has 'devices' property which experiments don't have)
+        if (exp.devices && !exp.is_current) {
+            continue; // This is a group, not an experiment
+        }
+        
         const displayName = exp.name || experimentId;
         const timeRange = exp.time_range || {};
         const isCurrent = exp.is_current || false;
         const startDate = timeRange.start ? new Date(timeRange.start).toLocaleDateString() : '';
         const endDate = timeRange.end ? new Date(timeRange.end).toLocaleDateString() : '';
         let dateRange = '';
+        let statusIndicator = '';
         if (isCurrent) {
+            statusIndicator = ' 🔵 '; // Blue dot for current experiment
             dateRange = ` (Current - started ${startDate})`;
         } else if (startDate && endDate) {
             dateRange = ` (${startDate} - ${endDate})`;
@@ -483,21 +509,21 @@ function populateExperimentSelects() {
         if (selectA) {
             const optionA = document.createElement('option');
             optionA.value = experimentId;
-            optionA.textContent = `${displayName}${dateRange}`;
+            optionA.textContent = `${statusIndicator}${displayName}${dateRange}`;
             selectA.appendChild(optionA);
         }
         
         if (selectB) {
             const optionB = document.createElement('option');
             optionB.value = experimentId;
-            optionB.textContent = `${displayName}${dateRange}`;
+            optionB.textContent = `${statusIndicator}${displayName}${dateRange}`;
             selectB.appendChild(optionB);
         }
         
         if (snapshotSelect) {
             const optionSnapshot = document.createElement('option');
             optionSnapshot.value = experimentId;
-            optionSnapshot.textContent = `${displayName}${dateRange}`;
+            optionSnapshot.textContent = `${statusIndicator}${displayName}${dateRange}`;
             snapshotSelect.appendChild(optionSnapshot);
         }
     }
@@ -1085,7 +1111,13 @@ function initializeCharts() {
                     },
                     pan: {
                         enabled: true,
-                        mode: 'x',
+                        mode: 'x', // Pan horizontally (left-right)
+                        threshold: 10, // Minimum distance to start panning
+                        modifierKey: null, // No modifier key needed
+                        drag: {
+                            enabled: true, // Enable drag to pan
+                            modifierKey: null // No modifier key needed
+                        }
                     },
                     limits: {
                         x: {min: 'original', max: 'original'}
@@ -1103,6 +1135,13 @@ function initializeCharts() {
                         } else if (chart === chartB && chartDataB) {
                             updateStatsForVisibleRange(chartB, 'B', chartDataB.data, chartDataB.devices);
                         }
+                    },
+                    // Enable double-click to reset zoom
+                    onZoomComplete: function({chart}) {
+                        // Double-click handler is added below
+                    },
+                    onPanComplete: function({chart}) {
+                        // Pan complete handler
                     }
                 }
             },
@@ -1219,7 +1258,11 @@ function updateChart(side, data, devices, stats, experiment) {
         chartDataB = { data, devices, stats, experiment };
     }
     
-    titleEl.textContent = `${experiment.name || experiment} - Power Consumption`;
+    // Update title with experiment status indicator
+    const exp = typeof experiment === 'object' ? experiment : experiments[experiment] || {};
+    const isCurrent = exp.is_current || false;
+    const statusIndicator = isCurrent ? ' 🔵 ' : '';
+    titleEl.textContent = `${statusIndicator}${exp.name || experiment || 'Chart ' + side} - Power Consumption`;
     
     // Update stats for the full dataset initially
     if (stats) {
@@ -2056,7 +2099,7 @@ async function updateOverlayChart() {
     
     // Update title
     document.getElementById('chartATitle').textContent = !splitCharts 
-        ? `Overlay: ${experimentA.name}${currentExperimentB ? ' vs ' + experiments[currentExperimentB].name : ''}`
+        ? `Chart A: ${experimentA.name}${currentExperimentB ? ' (overlaid with ' + experiments[currentExperimentB].name + ')' : ''}`
         : `${experimentA.name} - Power Consumption`;
 }
 
@@ -2343,6 +2386,49 @@ populateExperimentSelects = function() {
     originalPopulateExperimentSelects();
     populateExperimentSelectsForModals();
 };
+
+// Reset zoom for a specific chart
+function resetZoomForChart(chart) {
+    if (!chart) return;
+    
+    // Use Chart.js zoom plugin resetZoom method if available
+    if (typeof chart.resetZoom === 'function') {
+        chart.resetZoom();
+    } else if (chart.chart && typeof chart.chart.resetZoom === 'function') {
+        chart.chart.resetZoom();
+    } else {
+        // Fallback: manually reset scales to original bounds
+        const xScale = chart.scales?.x;
+        if (xScale) {
+            // Reset to original min/max (undefined means use data range)
+            if (xScale.options) {
+                xScale.options.min = undefined;
+                xScale.options.max = undefined;
+            }
+            chart.update('none');
+        }
+    }
+}
+
+// Reset zoom for active chart(s)
+function resetZoom() {
+    if (splitCharts) {
+        // Split mode: reset both charts
+        if (chartA) resetZoomForChart(chartA);
+        if (chartB) resetZoomForChart(chartB);
+    } else {
+        // Overlay mode: reset Chart A
+        if (chartA) resetZoomForChart(chartA);
+    }
+    
+    // Update stats to full range after reset
+    if (chartA && chartDataA) {
+        updateStatsForVisibleRange(chartA, 'A', chartDataA.data, chartDataA.devices);
+    }
+    if (chartB && chartDataB) {
+        updateStatsForVisibleRange(chartB, 'B', chartDataB.data, chartDataB.devices);
+    }
+}
 
 // Fullscreen toggle for chart containers
 function toggleFullscreen(containerId) {

@@ -279,20 +279,31 @@ async function downloadSnapshot(snapshotId, title) {
         const response = await fetch(imageUrl);
         
         if (!response.ok) {
-            throw new Error('Failed to download image');
+            const errorText = await response.text();
+            throw new Error(`Failed to download image: ${response.status} ${errorText}`);
         }
         
         const blob = await response.blob();
+        if (!blob || blob.size === 0) {
+            throw new Error('Received empty image file');
+        }
+        
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `${title || 'snapshot'}-${snapshotId}.png`;
+        a.download = `${(title || 'snapshot').replace(/[^a-z0-9]/gi, '_')}-${snapshotId}.png`;
+        a.style.display = 'none';
         document.body.appendChild(a);
         a.click();
-        window.URL.revokeObjectURL(url);
-        document.body.removeChild(a);
+        
+        // Clean up after a short delay
+        setTimeout(() => {
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+        }, 100);
     } catch (error) {
-        alert(`Error downloading snapshot: ${error.message}`);
+        console.error('Download error:', error);
+        alert(`Error downloading snapshot: ${error.message}\n\nPlease check the browser console for details.`);
     }
 }
 
