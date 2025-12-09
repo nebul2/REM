@@ -483,11 +483,12 @@ function populateExperimentSelects() {
         snapshotSelect.innerHTML = '<option value="">-- Select Experiment --</option>';
     }
     
-    // Only show experiments, NOT groups (fixes issue #7)
+    // Show all experiments - experiments have linked_groups, groups don't
     for (const [experimentId, exp] of Object.entries(experiments)) {
-        // Skip if this is actually a group (has 'devices' property which experiments don't have)
-        if (exp.devices && !exp.is_current) {
-            continue; // This is a group, not an experiment
+        // Skip if this is actually a group (groups don't have linked_groups property)
+        // Real experiments have linked_groups (even if empty array) or time_range
+        if (!exp.hasOwnProperty('linked_groups') && !exp.hasOwnProperty('time_range') && !exp.is_current) {
+            continue; // This is likely a group, not an experiment
         }
         
         const displayName = exp.name || experimentId;
@@ -529,53 +530,88 @@ function populateExperimentSelects() {
     }
 }
 
-// Populate groups dropdown for a chart based on selected experiment
+// Populate groups checkboxes for a chart based on selected experiment
 function populateGroupsForChart(side, experimentId) {
-    const groupsSelect = document.getElementById(`chart${side}Groups`);
-    if (!groupsSelect) return;
+    const groupsContainer = document.getElementById(`chart${side}Groups`);
+    if (!groupsContainer) return;
     
-    // Clear existing options
-    groupsSelect.innerHTML = '';
+    // Clear existing checkboxes
+    groupsContainer.innerHTML = '';
     
     if (!experimentId) {
-        groupsSelect.style.display = 'none';
+        groupsContainer.style.display = 'none';
         return;
     }
     
     const experiment = experiments[experimentId];
     if (!experiment) {
-        groupsSelect.style.display = 'none';
+        groupsContainer.style.display = 'none';
         return;
     }
     
     const linkedGroups = experiment.linked_groups || [];
     if (linkedGroups.length === 0) {
-        groupsSelect.innerHTML = '<option value="">No groups in this experiment</option>';
-        groupsSelect.style.display = 'block';
+        groupsContainer.innerHTML = '<p style="color: #666; font-size: 0.9rem; margin: 10px 0;">No groups linked to this experiment. Edit the experiment to add groups.</p>';
+        groupsContainer.style.display = 'block';
+        // Clear current groups
+        if (side === 'A') {
+            currentGroupsA = [];
+        } else {
+            currentGroupsB = [];
+        }
         return;
     }
     
-    // Add options for each linked group
+    // Create checkbox container
+    const checkboxContainer = document.createElement('div');
+    checkboxContainer.className = 'group-checkboxes';
+    checkboxContainer.style.cssText = 'display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px;';
+    
+    // Add checkboxes for each linked group
     linkedGroups.forEach(groupName => {
         const group = groups[groupName];
         if (group) {
-            const option = document.createElement('option');
-            option.value = groupName;
+            const label = document.createElement('label');
+            label.className = 'checkbox-label';
+            label.style.cssText = 'display: flex; align-items: center; gap: 5px; cursor: pointer; padding: 5px 10px; background: #161b22; border: 1px solid #30363d; border-radius: 4px;';
+            
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.value = groupName;
+            checkbox.checked = true; // Auto-select all by default
+            checkbox.style.cssText = 'cursor: pointer;';
+            
+            // Add change handler to update current groups
+            checkbox.addEventListener('change', () => {
+                updateSelectedGroups(side);
+            });
+            
+            const span = document.createElement('span');
             const deviceCount = (group.devices || []).length;
-            option.textContent = `${group.name || groupName} (${deviceCount} device${deviceCount !== 1 ? 's' : ''})`;
-            groupsSelect.appendChild(option);
+            span.textContent = `${group.name || groupName} (${deviceCount} device${deviceCount !== 1 ? 's' : ''})`;
+            span.style.cssText = 'font-size: 0.9rem; color: #c9d1d9;';
+            
+            label.appendChild(checkbox);
+            label.appendChild(span);
+            checkboxContainer.appendChild(label);
         }
     });
     
-    groupsSelect.style.display = 'block';
+    groupsContainer.appendChild(checkboxContainer);
+    groupsContainer.style.display = 'block';
     
-    // Auto-select all groups by default
-    Array.from(groupsSelect.options).forEach(option => {
-        if (option.value) option.selected = true;
-    });
+    // Update the current groups array after creating checkboxes
+    updateSelectedGroups(side);
+}
+
+// Update selected groups from checkboxes
+function updateSelectedGroups(side) {
+    const groupsContainer = document.getElementById(`chart${side}Groups`);
+    if (!groupsContainer) return;
     
-    // Update the current groups array after auto-selection
-    const selectedGroups = Array.from(groupsSelect.selectedOptions).map(opt => opt.value);
+    const checkboxes = groupsContainer.querySelectorAll('input[type="checkbox"]:checked');
+    const selectedGroups = Array.from(checkboxes).map(cb => cb.value);
+    
     if (side === 'A') {
         currentGroupsA = selectedGroups;
     } else {
