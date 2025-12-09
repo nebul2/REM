@@ -764,15 +764,6 @@ async def create_group(
     
     save_groups(groups)
     
-    # Also save as experiment
-    experiments = load_experiments()
-    experiments[name] = {
-        "name": name,
-        "devices": device_list,
-        "created_at": datetime.now().isoformat()
-    }
-    save_experiments(experiments)
-    
     return JSONResponse(content={"success": True, "group": groups[name]})
 
 
