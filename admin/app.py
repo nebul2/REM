@@ -787,13 +787,6 @@ async def update_group(
     
     save_groups(groups)
     
-    # Also update experiment
-    experiments = load_experiments()
-    if group_name in experiments:
-        experiments[group_name]["devices"] = device_list
-        experiments[group_name]["updated_at"] = datetime.now().isoformat()
-        save_experiments(experiments)
-    
     return JSONResponse(content={"success": True, "group": groups[group_name]})
 
 
@@ -807,12 +800,6 @@ async def delete_group(group_name: str):
     
     del groups[group_name]
     save_groups(groups)
-    
-    # Also delete from experiments
-    experiments = load_experiments()
-    if group_name in experiments:
-        del experiments[group_name]
-        save_experiments(experiments)
     
     return JSONResponse(content={"success": True})
 
