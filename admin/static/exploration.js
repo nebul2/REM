@@ -166,13 +166,8 @@ function setupEventListeners() {
         }
     });
     
-    // Chart A groups selection
-    document.getElementById('chartAGroups').addEventListener('change', (e) => {
-        currentGroupsA = Array.from(e.target.selectedOptions).map(opt => opt.value);
-        if (currentExperimentA && currentGroupsA.length > 0) {
-            loadChartData('A');
-        }
-    });
+    // Chart A group checkboxes are handled by updateSelectedGroups() in populateGroupsForChart
+    // Checkboxes have individual change handlers that call updateSelectedGroups()
     
     // Chart B experiment selection
     document.getElementById('chartBExperiment').addEventListener('change', (e) => {
@@ -206,13 +201,8 @@ function setupEventListeners() {
         }
     });
     
-    // Chart B groups selection
-    document.getElementById('chartBGroups').addEventListener('change', (e) => {
-        currentGroupsB = Array.from(e.target.selectedOptions).map(opt => opt.value);
-        if (currentExperimentB && currentGroupsB.length > 0) {
-            loadChartData('B');
-        }
-    });
+    // Chart B group checkboxes are handled by updateSelectedGroups() in populateGroupsForChart
+    // Checkboxes have individual change handlers that call updateSelectedGroups()
     
     document.getElementById('timeRange').addEventListener('change', (e) => {
         const newTimeRange = e.target.value;
@@ -581,9 +571,24 @@ function populateGroupsForChart(side, experimentId) {
             checkbox.checked = true; // Auto-select all by default
             checkbox.style.cssText = 'cursor: pointer;';
             
-            // Add change handler to update current groups
+            // Add change handler to update current groups and reload chart
             checkbox.addEventListener('change', () => {
                 updateSelectedGroups(side);
+                // Reload chart if experiment is selected and at least one group is selected
+                const selectedGroups = side === 'A' ? currentGroupsA : currentGroupsB;
+                const experimentId = side === 'A' ? currentExperimentA : currentExperimentB;
+                if (experimentId && selectedGroups.length > 0) {
+                    loadChartData(side);
+                } else if (experimentId && selectedGroups.length === 0) {
+                    // Clear chart if no groups selected
+                    if (side === 'A' && chartA) {
+                        chartA.destroy();
+                        chartA = null;
+                    } else if (side === 'B' && chartB) {
+                        chartB.destroy();
+                        chartB = null;
+                    }
+                }
             });
             
             const span = document.createElement('span');
