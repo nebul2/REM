@@ -2714,18 +2714,20 @@ async function refreshCurrentCharts() {
     }
     
     // Only refresh if we have active charts
-    if (currentExperimentA && currentGroupsA.length > 0) {
-        console.log('Auto-refreshing Chart A...');
-        await loadChartData('A');
-        
-        // Auto-scroll to latest time
-        if (chartA && chartA.data.datasets.length > 0) {
-            autoScrollToLatest(chartA);
-        }
-    } else if (chartDataA && chartDataA.experiment && chartDataA.experiment.id === 'all-devices') {
-        // Default chart case - reload with current time range
-        console.log('Auto-refreshing default chart...');
-        try {
+    try {
+        if (currentExperimentA && currentGroupsA.length > 0) {
+            console.log('Auto-refreshing Chart A...');
+            await loadChartData('A');
+            
+            // Auto-scroll to latest time
+            if (chartA && chartA.data.datasets.length > 0) {
+                autoScrollToLatest(chartA);
+            }
+            lastRefreshSuccess = true;
+            consecutiveFailures = 0;
+        } else if (chartDataA && chartDataA.experiment && chartDataA.experiment.id === 'all-devices') {
+            // Default chart case - reload with current time range
+            console.log('Auto-refreshing default chart...');
             await reloadDefaultChartWithCurrentTimeRange();
             
             // Auto-scroll to latest time
@@ -2734,29 +2736,22 @@ async function refreshCurrentCharts() {
             }
             lastRefreshSuccess = true;
             consecutiveFailures = 0;
-        } catch (error) {
-            lastRefreshSuccess = false;
-            consecutiveFailures++;
-            console.warn(`Auto-refresh failed (${consecutiveFailures} consecutive):`, error);
-            // Don't show alert for auto-refresh failures to avoid spam
         }
-            console.warn(`Auto-refresh failed (${consecutiveFailures} consecutive):`, error);
-            // Don't show alert for auto-refresh failures to avoid spam
-        }
-    }
-    
-    if (splitCharts && currentExperimentB && currentGroupsB.length > 0) {
-        console.log('Auto-refreshing Chart B...');
-        try {
+        
+        if (splitCharts && currentExperimentB && currentGroupsB.length > 0) {
+            console.log('Auto-refreshing Chart B...');
             await loadChartData('B');
             
             // Auto-scroll to latest time
             if (chartB && chartB.data.datasets.length > 0) {
                 autoScrollToLatest(chartB);
             }
-        } catch (error) {
-            console.warn('Auto-refresh Chart B failed:', error);
         }
+    } catch (error) {
+        lastRefreshSuccess = false;
+        consecutiveFailures++;
+        console.warn(`Auto-refresh failed (${consecutiveFailures} consecutive):`, error);
+        // Don't show alert for auto-refresh failures to avoid spam
     }
 }
 
