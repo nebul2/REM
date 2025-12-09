@@ -580,13 +580,33 @@ function populateGroupsForChart(side, experimentId) {
                 if (experimentId && selectedGroups.length > 0) {
                     loadChartData(side);
                 } else if (experimentId && selectedGroups.length === 0) {
-                    // Clear chart if no groups selected
-                    if (side === 'A' && chartA) {
-                        chartA.destroy();
-                        chartA = null;
-                    } else if (side === 'B' && chartB) {
-                        chartB.destroy();
-                        chartB = null;
+                    // Clear chart data but keep chart alive (preserves grid/scale)
+                    const chart = side === 'A' ? chartA : chartB;
+                    if (chart) {
+                        // Clear all datasets but keep the chart structure
+                        chart.data.datasets = [];
+                        chart.update('none');
+                        
+                        // Update title to show no groups selected
+                        const titleEl = document.getElementById(`chart${side}Title`);
+                        if (titleEl) {
+                            const experiment = experiments[experimentId];
+                            const expName = experiment ? experiment.name : experimentId;
+                            titleEl.textContent = `${expName} - No groups selected`;
+                        }
+                        
+                        // Clear stats
+                        const totalEl = document.getElementById(`total${side}`);
+                        const avgEl = document.getElementById(`avg${side}`);
+                        const meanEl = document.getElementById(`mean${side}`);
+                        const medianEl = document.getElementById(`median${side}`);
+                        if (totalEl) totalEl.textContent = '0';
+                        if (avgEl) avgEl.textContent = '0';
+                        if (meanEl) meanEl.textContent = '0';
+                        if (medianEl) medianEl.textContent = '0';
+                    } else {
+                        // Chart doesn't exist yet - initialize it with empty data
+                        initializeCharts();
                     }
                 }
             });
