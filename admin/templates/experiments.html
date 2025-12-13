@@ -113,7 +113,10 @@
                         </div>
                         <div>
                             <label style="font-size: 0.85rem; color: #666;">End Time:</label>
-                            <input type="datetime-local" id="editExperimentEndTime">
+                            <div style="display: flex; gap: 5px; align-items: center;">
+                                <input type="datetime-local" id="editExperimentEndTime" style="flex: 1;">
+                                <button type="button" onclick="clearEndTime()" class="btn btn-small" style="white-space: nowrap;">Clear</button>
+                            </div>
                         </div>
                     </div>
                     <div style="margin-top: 10px;">

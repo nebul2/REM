@@ -272,26 +272,36 @@ function toggleGalleryFullscreen() {
     }
 }
 
-// Download snapshot image
+// Download snapshot as ZIP (image + CSV)
 async function downloadSnapshot(snapshotId, title) {
     try {
-        const imageUrl = `/api/snapshots/${snapshotId}/image`;
-        const response = await fetch(imageUrl);
+        const zipUrl = `/api/snapshots/${snapshotId}/download`;
+        const response = await fetch(zipUrl);
         
         if (!response.ok) {
             const errorText = await response.text();
-            throw new Error(`Failed to download image: ${response.status} ${errorText}`);
+            throw new Error(`Failed to download ZIP: ${response.status} ${errorText}`);
         }
         
         const blob = await response.blob();
         if (!blob || blob.size === 0) {
-            throw new Error('Received empty image file');
+            throw new Error('Received empty ZIP file');
+        }
+        
+        // Get filename from Content-Disposition header or generate one
+        const contentDisposition = response.headers.get('Content-Disposition');
+        let filename = `${(title || 'snapshot').replace(/[^a-z0-9]/gi, '_')}-${snapshotId.substring(0, 8)}.zip`;
+        if (contentDisposition) {
+            const filenameMatch = contentDisposition.match(/filename="?([^"]+)"?/i);
+            if (filenameMatch) {
+                filename = filenameMatch[1];
+            }
         }
         
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `${(title || 'snapshot').replace(/[^a-z0-9]/gi, '_')}-${snapshotId}.png`;
+        a.download = filename;
         a.style.display = 'none';
         document.body.appendChild(a);
         a.click();

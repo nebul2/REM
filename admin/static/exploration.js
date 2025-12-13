@@ -1172,12 +1172,40 @@ function initializeCharts() {
                             return; // Prevent toggling statistical overlays
                         }
                         
-                        // Let Chart.js handle the default toggle behavior for device datasets
-                        const meta = chart.getDatasetMeta(index);
-                        meta.hidden = meta.hidden === null ? !dataset.hidden : null;
+                        // Grafana-like behavior: shift+click = toggle, single click = select only
+                        const isShiftPressed = e.native?.shiftKey || e.shiftKey;
                         
-                        // Recalculate statistics based on visible devices after toggle
-                        setTimeout(() => recalculateStatisticsForChart(chart), 100);
+                        if (isShiftPressed) {
+                            // Shift+click: Toggle this device only (add/remove from selection)
+                            const meta = chart.getDatasetMeta(index);
+                            meta.hidden = meta.hidden === null ? !dataset.hidden : null;
+                        } else {
+                            // Single click: Show only this device (hide all other device datasets)
+                            // Find all device datasets (exclude statistical overlays)
+                            const deviceDatasets = chart.data.datasets
+                                .map((ds, idx) => ({ dataset: ds, index: idx }))
+                                .filter(({ dataset }) => {
+                                    const label = dataset.label || '';
+                                    return !['Mean', 'Median', 'Total', 'Average', 'Annotations'].some(stat => 
+                                        label.includes(stat) || label.startsWith(stat + ':')
+                                    );
+                                });
+                            
+                            // Hide all device datasets except the clicked one
+                            deviceDatasets.forEach(({ index: idx }) => {
+                                const meta = chart.getDatasetMeta(idx);
+                                meta.hidden = (idx !== index); // Hide if not the clicked one
+                            });
+                        }
+                        
+    chart.update();
+    
+    // Update scrollbar if chart is zoomed
+    const chartId = chart === chartA ? 'A' : 'B';
+    updateChartScrollbar(chartId);
+    
+    // Recalculate statistics based on visible devices after toggle
+    setTimeout(() => recalculateStatisticsForChart(chart), 100);
                     }
                 },
                 tooltip: {
@@ -1226,7 +1254,7 @@ function initializeCharts() {
                     },
                     pan: {
                         enabled: true,
-                        mode: 'x', // Pan horizontally (left-right)
+                        mode: 'xy', // Pan both horizontally and vertically
                         threshold: 10, // Minimum pixels to move before panning starts
                         modifierKey: null, // No modifier key needed for pan
                         speed: 10, // Pan speed multiplier
@@ -1237,20 +1265,27 @@ function initializeCharts() {
                     onZoom: function({chart}) {
                         if (chart === chartA && chartDataA) {
                             updateStatsForVisibleRange(chartA, 'A', chartDataA.data, chartDataA.devices);
+                            setTimeout(() => updateChartScrollbar('A'), 100);
                         } else if (chart === chartB && chartDataB) {
                             updateStatsForVisibleRange(chartB, 'B', chartDataB.data, chartDataB.devices);
+                            setTimeout(() => updateChartScrollbar('B'), 100);
                         }
                     },
                     onPan: function({chart}) {
                         if (chart === chartA && chartDataA) {
                             updateStatsForVisibleRange(chartA, 'A', chartDataA.data, chartDataA.devices);
+                            setTimeout(() => updateChartScrollbar('A'), 100);
                         } else if (chart === chartB && chartDataB) {
                             updateStatsForVisibleRange(chartB, 'B', chartDataB.data, chartDataB.devices);
+                            setTimeout(() => updateChartScrollbar('B'), 100);
                         }
                     },
-                    // Enable double-click to reset zoom
                     onZoomComplete: function({chart}) {
-                        // Double-click handler is added below
+                        if (chart === chartA) {
+                            setTimeout(() => updateChartScrollbar('A'), 150);
+                        } else if (chart === chartB) {
+                            setTimeout(() => updateChartScrollbar('B'), 150);
+                        }
                     },
                     onPanComplete: function({chart}) {
                         // Pan complete handler
@@ -1296,12 +1331,275 @@ function initializeCharts() {
     chartA = new Chart(ctxA, { ...chartConfig, data: { datasets: [] } });
     chartB = new Chart(ctxB, { ...chartConfig, data: { datasets: [] } });
     
+    // Move scrollbar container to correct position (after chart, before legend)
+    // Chart.js might render legend after our HTML, so we reposition the scrollbar
+    moveScrollbarToCorrectPosition('A');
+    moveScrollbarToCorrectPosition('B');
+    
     // Add click handlers for annotation markers
     setupAnnotationClickHandlers(chartA);
     setupAnnotationClickHandlers(chartB);
     
+    // Setup scrollbar handlers
+    setupChartScrollbars();
+    
+    // Start polling to detect zoom/pan changes (fallback if callbacks don't fire)
+    startScrollbarPolling();
+    
     // Note: Zoom/pan stats updates are handled by the zoom plugin callbacks
     // which are configured in the chart options if needed
+}
+
+// Poll for zoom/pan changes (fallback if zoom plugin callbacks don't fire)
+function startScrollbarPolling() {
+    if (scrollbarUpdateInterval) {
+        clearInterval(scrollbarUpdateInterval);
+    }
+    
+    scrollbarUpdateInterval = setInterval(() => {
+        // Check Chart A
+        if (chartA && chartDataA) {
+            const xScale = chartA.scales?.x;
+            if (xScale) {
+                const currentMin = typeof xScale.min === 'number' ? xScale.min : (xScale.min instanceof Date ? xScale.min.getTime() : new Date(xScale.min).getTime());
+                const currentMax = typeof xScale.max === 'number' ? xScale.max : (xScale.max instanceof Date ? xScale.max.getTime() : new Date(xScale.max).getTime());
+                
+                // Check if scale values changed
+                if (lastScaleValuesA.min !== currentMin || lastScaleValuesA.max !== currentMax) {
+                    lastScaleValuesA.min = currentMin;
+                    lastScaleValuesA.max = currentMax;
+                    updateChartScrollbar('A');
+                }
+            }
+        }
+        
+        // Check Chart B
+        if (chartB && chartDataB) {
+            const xScale = chartB.scales?.x;
+            if (xScale) {
+                const currentMin = typeof xScale.min === 'number' ? xScale.min : (xScale.min instanceof Date ? xScale.min.getTime() : new Date(xScale.min).getTime());
+                const currentMax = typeof xScale.max === 'number' ? xScale.max : (xScale.max instanceof Date ? xScale.max.getTime() : new Date(xScale.max).getTime());
+                
+                // Check if scale values changed
+                if (lastScaleValuesB.min !== currentMin || lastScaleValuesB.max !== currentMax) {
+                    lastScaleValuesB.min = currentMin;
+                    lastScaleValuesB.max = currentMax;
+                    updateChartScrollbar('B');
+                }
+            }
+        }
+    }, 200); // Check every 200ms
+}
+
+function stopScrollbarPolling() {
+    if (scrollbarUpdateInterval) {
+        clearInterval(scrollbarUpdateInterval);
+        scrollbarUpdateInterval = null;
+    }
+}
+
+// Track previous scale values to detect zoom/pan changes
+let lastScaleValuesA = { min: null, max: null };
+let lastScaleValuesB = { min: null, max: null };
+let scrollbarUpdateInterval = null;
+
+// Move scrollbar container to correct position (after chart wrapper, before legend)
+function moveScrollbarToCorrectPosition(chartId) {
+    const chartContainer = chartId === 'A' 
+        ? document.getElementById('chartContainerA')
+        : document.getElementById('chartContainerB');
+    const chartWrapper = chartContainer?.querySelector('.chart-wrapper');
+    const scrollbarContainer = chartId === 'A'
+        ? document.getElementById('scrollbarContainerA')
+        : document.getElementById('scrollbarContainerB');
+    
+    if (chartContainer && chartWrapper && scrollbarContainer) {
+        // Insert scrollbar container right after chart wrapper
+        chartWrapper.parentNode.insertBefore(scrollbarContainer, chartWrapper.nextSibling);
+    }
+}
+
+// Setup scrollbar controls for chart navigation
+function setupChartScrollbars() {
+    const scrollbarA = document.getElementById('chartAScrollbar');
+    const scrollbarB = document.getElementById('chartBScrollbar');
+    
+    if (scrollbarA) {
+        scrollbarA.addEventListener('input', function(e) {
+            handleScrollbarChange('A', parseFloat(e.target.value));
+        });
+    }
+    
+    if (scrollbarB) {
+        scrollbarB.addEventListener('input', function(e) {
+            handleScrollbarChange('B', parseFloat(e.target.value));
+        });
+    }
+}
+
+// Handle scrollbar changes - pan the chart horizontally
+function handleScrollbarChange(chartId, scrollValue) {
+    const chart = chartId === 'A' ? chartA : chartB;
+    if (!chart) return;
+    
+    // Prevent scrollbar from being hidden during interaction
+    const container = chartId === 'A' ? document.getElementById('scrollbarContainerA') : document.getElementById('scrollbarContainerB');
+    if (container) {
+        container.style.display = 'block'; // Force visible during interaction
+    }
+    
+    const zoomPlugin = chart.options.plugins.zoom;
+    if (!zoomPlugin || !chart.isDatasetVisible) return;
+    
+    // Get the current scale limits
+    const xScale = chart.scales.x;
+    if (!xScale) return;
+    
+    // Get the data range
+    const data = chartId === 'A' ? chartDataA : chartDataB;
+    if (!data || !data.data || data.data.length === 0) return;
+    
+    const timestamps = data.data.map(d => new Date(d.timestamp).getTime()).filter(t => !isNaN(t));
+    if (timestamps.length === 0) return;
+    
+    const minTime = Math.min(...timestamps);
+    const maxTime = Math.max(...timestamps);
+    const timeRange = maxTime - minTime;
+    
+    // Get current visible range
+    const currentMin = xScale.min;
+    const currentMax = xScale.max;
+    const currentRange = currentMax - currentMin;
+    
+    // Calculate new position based on scroll value (0-100)
+    const scrollPosition = scrollValue / 100;
+    const availableScroll = timeRange - currentRange;
+    
+    if (availableScroll <= 0) {
+        // Chart is not zoomed in, hide scrollbar
+        const container = chartId === 'A' ? document.getElementById('scrollbarContainerA') : document.getElementById('scrollbarContainerB');
+        if (container) container.style.display = 'none';
+        return;
+    }
+    
+    const newMin = minTime + (scrollPosition * availableScroll);
+    const newMax = newMin + currentRange;
+    
+    // Update the chart's x-axis scale
+    xScale.options.min = new Date(newMin);
+    xScale.options.max = new Date(newMax);
+    chart.update('none'); // Update without animation
+    
+    // Update scrollbar labels
+    updateScrollbarLabels(chartId, new Date(newMin), new Date(newMax));
+    
+    // Re-update scrollbar position to prevent hiding
+    setTimeout(() => {
+        updateChartScrollbar(chartId);
+    }, 50);
+}
+
+// Update scrollbar labels with time range
+function updateScrollbarLabels(chartId, minDate, maxDate) {
+    const minLabel = chartId === 'A' ? document.getElementById('scrollbarMinA') : document.getElementById('scrollbarMinB');
+    const maxLabel = chartId === 'A' ? document.getElementById('scrollbarMaxA') : document.getElementById('scrollbarMaxB');
+    
+    if (minLabel) {
+        minLabel.textContent = minDate.toLocaleString();
+    }
+    if (maxLabel) {
+        maxLabel.textContent = maxDate.toLocaleString();
+    }
+}
+
+// Update scrollbar position and visibility when chart zoom changes
+function updateChartScrollbar(chartId) {
+    const chart = chartId === 'A' ? chartA : chartB;
+    const data = chartId === 'A' ? chartDataA : chartDataB;
+    const scrollbar = chartId === 'A' ? document.getElementById('chartAScrollbar') : document.getElementById('chartBScrollbar');
+    const container = chartId === 'A' ? document.getElementById('scrollbarContainerA') : document.getElementById('scrollbarContainerB');
+    
+    if (!chart || !data || !data.data || !scrollbar || !container) {
+        if (container) container.style.display = 'none';
+        return;
+    }
+    
+    const xScale = chart.scales.x;
+    if (!xScale) return;
+    
+    const timestamps = data.data.map(d => new Date(d.timestamp).getTime()).filter(t => !isNaN(t));
+    if (timestamps.length === 0) {
+        container.style.display = 'none';
+        return;
+    }
+    
+    const minTime = Math.min(...timestamps);
+    const maxTime = Math.max(...timestamps);
+    const timeRange = maxTime - minTime;
+    
+    // Get current visible range - handle both Date objects and string timestamps
+    let currentMin, currentMax;
+    try {
+        // Read the actual displayed range from the scale
+        // Chart.js zoom plugin stores zoomed limits in xScale.min/max, but we need to get the actual pixel range
+        // The scale.min and scale.max represent the data range, but after zoom they represent the visible range
+        if (xScale.min instanceof Date) {
+            currentMin = xScale.min.getTime();
+        } else if (typeof xScale.min === 'string') {
+            currentMin = new Date(xScale.min).getTime();
+        } else if (typeof xScale.min === 'number') {
+            currentMin = xScale.min;
+        } else {
+            // Try to parse as number or date
+            currentMin = new Date(xScale.min).getTime();
+        }
+        
+        if (xScale.max instanceof Date) {
+            currentMax = xScale.max.getTime();
+        } else if (typeof xScale.max === 'string') {
+            currentMax = new Date(xScale.max).getTime();
+        } else if (typeof xScale.max === 'number') {
+            currentMax = xScale.max;
+        } else {
+            // Try to parse as number or date
+            currentMax = new Date(xScale.max).getTime();
+        }
+    } catch (e) {
+        console.error(`Error parsing scale values for ${chartId}:`, e);
+        container.style.display = 'none';
+        return;
+    }
+    
+    const currentRange = currentMax - currentMin;
+    
+    // Show scrollbar if zoomed in (current range is less than 99% of total range)
+    // Use a very lenient threshold - if showing less than 99% of the range, show scrollbar
+    const zoomRatio = timeRange > 0 ? (currentRange / timeRange) : 1;
+    // Calculate if zoomed - use a small buffer (1% = 36000ms for 1 hour) to account for rounding
+    const buffer = Math.max(1000, timeRange * 0.01); // At least 1 second, or 1% of range
+    const isZoomed = timeRange > 0 && (currentRange + buffer) < timeRange;
+    
+    
+    if (isZoomed) {
+        container.style.display = 'block';
+        container.style.visibility = 'visible';
+        container.style.opacity = '1';
+        
+        // Calculate scrollbar position
+        const availableScroll = timeRange - currentRange;
+        if (availableScroll > 0) {
+            const scrollPosition = ((currentMin - minTime) / availableScroll) * 100;
+            scrollbar.value = Math.max(0, Math.min(100, scrollPosition));
+        } else {
+            scrollbar.value = 0;
+        }
+        
+        // Update labels
+        updateScrollbarLabels(chartId, new Date(currentMin), new Date(currentMax));
+    } else {
+        container.style.display = 'none';
+        container.style.visibility = 'hidden';
+    }
 }
 
 // Setup click handlers for annotation markers
@@ -1552,6 +1850,17 @@ function updateChart(side, data, devices, stats, experiment) {
     } else {
         chartDataB = { data, devices, stats, experiment };
     }
+    
+    // Update scrollbar visibility and position after chart update
+    setTimeout(() => {
+        try {
+            if (typeof updateChartScrollbar === 'function') {
+                updateChartScrollbar(side);
+            }
+        } catch (e) {
+            // Silently fail - scrollbar update is non-critical
+        }
+    }, 300);
 }
 
 // Recalculate statistics based on visible device datasets
@@ -1874,24 +2183,31 @@ function updateCharts() {
     console.log('updateCharts called - showMean:', showMean, 'showMedian:', showMedian, 'showTotal:', showTotal, 'showAverage:', showAverage, 'splitCharts:', splitCharts);
     console.log('chartDataA exists:', !!chartDataA, 'currentExperimentA:', currentExperimentA);
     
-    // Always rebuild Chart A if we have stored data (works for both overlay and split modes)
-    if (chartDataA) {
-        console.log('Rebuilding Chart A with stored data and toggle states');
-        updateChart('A', chartDataA.data, chartDataA.devices, chartDataA.stats, chartDataA.experiment);
-    } else if (!splitCharts && currentExperimentA) {
+    if (!splitCharts) {
         // Overlay mode: rebuild overlay chart
-        console.log('Rebuilding overlay chart...');
-        updateOverlayChart();
-    } else if (splitCharts) {
+        if (chartDataA) {
+            console.log('Rebuilding Chart A with stored data and toggle states (overlay mode)');
+            updateChart('A', chartDataA.data, chartDataA.devices, chartDataA.stats, chartDataA.experiment);
+        } else if (currentExperimentA) {
+            console.log('Rebuilding overlay chart...');
+            updateOverlayChart();
+        }
+    } else {
         // Split mode: rebuild both charts with existing data if available
         console.log('Rebuilding split charts...');
-        if (currentExperimentA && currentGroupsA.length > 0) {
+        
+        // Always rebuild Chart A if we have stored data
+        if (chartDataA) {
+            console.log('Rebuilding Chart A with stored data and toggle states');
+            updateChart('A', chartDataA.data, chartDataA.devices, chartDataA.stats, chartDataA.experiment);
+        } else if (currentExperimentA && currentGroupsA.length > 0) {
             console.log('Loading Chart A from server');
             loadChartData('A');
         }
         
+        // Always rebuild Chart B if we have stored data (FIX: This was missing!)
         if (chartDataB) {
-            console.log('Rebuilding Chart B with stored data');
+            console.log('Rebuilding Chart B with stored data and toggle states');
             updateChart('B', chartDataB.data, chartDataB.devices, chartDataB.stats, chartDataB.experiment);
         } else if (currentExperimentB && currentGroupsB.length > 0) {
             console.log('Loading Chart B from server');

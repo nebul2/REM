@@ -15,9 +15,11 @@ The GOS REM Data Exploration Tool is an interactive web interface for analyzing 
 ### Navigation Menu
 
 The top navigation bar provides quick access to:
+- **Exploration**: Main data visualization and chart interface
 - **Groups**: Manage device groups for organizing experiments
 - **Experiments**: Create and manage experiments (time-based studies)
 - **Gallery**: View saved chart snapshots
+- **Admin**: Database export/import for backup and migration
 
 ## Main Exploration Page
 
@@ -39,6 +41,18 @@ On first load, the system automatically displays:
 - Real-time updates every 30 seconds
 
 ### Controls Panel
+
+#### Device Selection (Chart Legend)
+
+You can interact with devices directly from the chart legend:
+
+- **Single Click**: Click a device name in the legend to show ONLY that device (all others are hidden)
+- **Click Again**: If only one device is visible and you click it again, all devices are shown again
+- **Shift+Click**: Hold Shift and click to add/remove devices from the selection (toggle without affecting others)
+
+This makes it easy to quickly focus on specific devices or compare a few devices without using checkboxes.
+
+**Note**: Statistical overlays (Mean, Median, Total, Average) cannot be toggled via legend clicks - use the checkboxes in the controls panel.
 
 #### Time Range Selection
 
@@ -84,6 +98,14 @@ Toggle visibility of calculated statistics:
 - **Average**: Same as mean (included for clarity)
 
 **Tip**: Use the legend to show/hide individual devices, and the statistics will automatically recalculate based on visible devices only.
+
+#### Zoom and Pan
+
+- **Zoom**: Use mouse wheel to zoom in/out on the time axis
+- **Pan**: Click and drag anywhere on the chart to pan in both horizontal and vertical directions
+- **Reset Zoom**: Double-click on the chart or use the "Reset Zoom" button to return to the full time range
+- **Zoom with Shift**: Hold Shift while scrolling to zoom out
+- **Scrollbar**: When zoomed in, a horizontal scrollbar appears below the chart for easy navigation through the time range
 
 #### Live Updates
 
@@ -232,14 +254,52 @@ See "Creating Experiments" under Experiment Controls above.
 2. Browse saved snapshots
 3. Click on a snapshot to view full details
 4. Use fullscreen mode for detailed analysis
-5. Download snapshots for reports
+5. Download snapshots as ZIP files (image + CSV data + metadata)
 
 ### Snapshot Features
 
 - **Fullscreen View**: Click the fullscreen icon for detailed analysis
-- **Download**: Download snapshot images for reports
+- **Download**: Download snapshot as ZIP file containing:
+  - PNG image of the chart
+  - CSV file with all data points for the snapshot's time range
+  - JSON metadata file with experiment details and energy statistics
 - **Search**: Filter snapshots by experiment or date
 - **Details**: View experiment, groups, time range, and notes
+
+## Admin - Data Export & Import
+
+### Exporting Your Database
+
+You can export your complete GOS REM database for backup or migration:
+
+1. Navigate to **Admin** in the menu
+2. Click **Export Database**
+3. The system will create a ZIP file containing:
+   - All TimescaleDB data (power measurements)
+   - All experiments and configurations
+   - All device groups
+   - All snapshots (images and metadata)
+   - All annotations
+4. The download will start automatically when ready
+
+**Note:** Large databases may take several minutes to export.
+
+### Importing a Database Backup
+
+To restore a previously exported backup:
+
+1. Navigate to **Admin** in the menu
+2. Select the exported ZIP file
+3. Click **Import Database**
+4. Confirm the import (this will replace all existing data)
+
+**⚠️ Warning:** Importing will replace ALL existing data, experiments, groups, and snapshots. This cannot be undone. Always export your current data before importing.
+
+### Use Cases
+
+- **Backup:** Regular backups before major changes
+- **Migration:** Move your data to a new server/instance
+- **Cloning:** Duplicate your setup for testing
 
 ## Tips and Best Practices
 

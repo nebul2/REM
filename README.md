@@ -10,8 +10,8 @@ A Docker-based system for collecting real-time power consumption data from TP-Li
 
 - **[Simple Deployment Guide](#simple-deployment-guide)** - Step-by-step setup for non-technical users
 - **[User Guide](docs/USER_GUIDE.md)** - Complete guide to using the GOS REM Data Exploration Tool
+- **[Changelog](docs/CHANGELOG.md)** - Version history and release notes
 - **[Documentation](docs/)** - All development notes and detailed guides
-- **[Project Plan](docs/PROJECT_PLAN.md)** - Detailed implementation plan and architecture
 
 ---
 
@@ -122,13 +122,16 @@ The Greening of Streaming (GOS) organization uses this system to:
 - ✅ **Collector Control**: Web-based start/stop/pause and polling interval control
 - ✅ **Experiment Management**: Device grouping and A/B testing support
 - ✅ **Snapshot Gallery**: Save and archive chart snapshots with annotations
+- ✅ **Database Export/Import**: Full backup and migration capabilities
 
 ### Key Features
 - 📊 **Interactive Charts**: Overlay multiple experiments, toggle device visibility, statistical overlays
 - 🔬 **Experiment Groups**: Create device groups for A/B testing and comparisons
 - 📈 **Statistical Analysis**: Mean, median, total, and average calculations with legend-based filtering
-- 📸 **Snapshot Archive**: Save chart snapshots with annotations for future reference
-- ⏱️ **Dynamic Time Ranges**: Zoom, pan, and select time ranges for detailed analysis
+- 📸 **Snapshot Archive**: Save chart snapshots with annotations and download as ZIP (image + CSV + metadata)
+- ⏱️ **Dynamic Time Ranges**: Zoom, pan (xy mode), and select time ranges for detailed analysis
+- 🖱️ **Grafana-like Selection**: Single-click to select only one device, shift-click to toggle multiple devices
+- 💾 **Data Export/Import**: Full database backup and migration support (ZIP format)
 - 🎨 **GoS Branding**: Consistent branding with Greening of Streaming logo and colors
 
 ---
@@ -194,6 +197,7 @@ Access:
 - **Data Exploration Tool**: http://localhost:7001
 - **Manage Groups**: http://localhost:7001/manage
 - **Snapshot Gallery**: http://localhost:7001/gallery
+- **Admin (Export/Import)**: http://localhost:7001/admin
 
 ---
 
@@ -263,6 +267,7 @@ ORDER BY time;
 - **Annotation System**: Add timeline markers with notes
 - **Snapshot Gallery**: Save, archive, and search historical charts
 - **Collector Control**: Start/stop polling and adjust polling frequency via UI
+- **Database Export/Import**: Full backup and migration support for all data, experiments, groups, and snapshots
 
 ---
 
@@ -338,29 +343,47 @@ python tests/load_test.py
 
 ---
 
-## Migration from Pi400
+## Data Backup & Migration
 
-### Backup Current Data
+### Using the Admin Interface (Recommended)
+
+The easiest way to backup or migrate your data is through the web interface:
+
+1. Navigate to **Admin** in the menu (http://localhost:7001/admin)
+2. Click **Export Database** to download a complete backup ZIP file
+3. To restore, select the ZIP file and click **Import Database**
+
+The export includes:
+- All TimescaleDB power measurement data
+- All experiments and configurations
+- All device groups
+- All snapshots (images and metadata)
+- All annotations
+
+### Manual Backup (Advanced)
+
+For manual backups using `pg_dump`:
+
 ```bash
-# SSH to Pi400
-ssh pi400
+# Export database
+docker exec stats-timescaledb pg_dump -U gos gos_rem > backup_$(date +%Y%m%d).sql
 
-# Backup InfluxDB
-influx backup /tmp/influx-backup \
-  -t gwTu1qAtPgIRU8eWNpLXuz92pKo6_lgV7Y4mhdMM7n_XOe-fTXts7T54P_FQJ69UMVuTyhr77Ly7XCGz9QUNAA==
-
-# Copy to local
-scp -r pi400:/tmp/influx-backup ./backup/
+# Copy JSON files
+cp admin/data/device_groups.json backup/
+cp admin/data/experiments.json backup/
+cp admin/data/snapshots.json backup/
+cp -r admin/data/snapshots/ backup/
 ```
 
-### Restore to Container
-```bash
-# Start stack
-docker-compose up -d
+### Restore Manual Backup
 
-# Restore data
-docker cp ./backup/ stats-influxdb:/backup/
-docker exec stats-influxdb influx restore /backup/
+```bash
+# Restore database
+cat backup_*.sql | docker exec -i stats-timescaledb psql -U gos gos_rem
+
+# Restore JSON files
+cp backup/*.json admin/data/
+cp -r backup/snapshots/* admin/data/snapshots/
 ```
 
 ---
@@ -509,8 +532,8 @@ TBD - To be determined with GOS team
 
 ---
 
-**Last Updated**: 2025-12-08  
-**Version**: 1.1.0  
+**Last Updated**: 2025-12-12  
+**Version**: 1.2.0  
 **Status**: ✅ Operational and Deployed on Pi400 (staging)  
 **Documentation**: All development notes and guides are in the [`docs/`](docs/) folder
 
@@ -518,7 +541,41 @@ TBD - To be determined with GOS team
 
 ## Release Notes
 
-### v1.1.0 (Current Release - 2025-12-08)
+### v1.3.0 (Current Release - 2025-12-13)
+
+**User Feedback Release** - Based on feedback from Ben:
+- Added horizontal scrollbar for zoomed charts
+- Snapshot ZIP downloads now include CSV data export
+- Improved chart navigation and data export capabilities
+
+### v1.2.0 (2025-12-12)
+
+#### What's New
+- ✅ **Database Export/Import**: Full backup and migration support - export all data, experiments, groups, and snapshots as ZIP
+- ✅ **Grafana-like Device Selection**: Single-click legend to select one device, shift-click to toggle multiple devices
+- ✅ **Snapshot ZIP Downloads**: Download snapshots as ZIP containing image, CSV data, and metadata
+- ✅ **Chart B Statistical Overlays**: Statistical overlays now work correctly in split chart mode
+- ✅ **Experiment Reactivation**: Clear end dates to reactivate "current" experiments
+- ✅ **Improved Pan/Zoom**: Click and drag to pan in both horizontal and vertical directions
+- ✅ **Gallery Layout Fixes**: Better handling of long experiment details in snapshot gallery
+
+#### Bug Fixes
+- Fixed Chart B statistical overlays not working in split mode
+- Fixed gallery download button not working
+- Fixed gallery layout breaking with long experiment details
+- Fixed experiment reactivation (clearing end dates)
+- Fixed pan mode (now supports both x and y axes)
+- Fixed alert spam during auto-refresh failures
+
+#### Technical Improvements
+- Added export/import endpoints with pg_dump/CSV fallback support
+- Improved error handling for consecutive API failures
+- Enhanced UI with progress indicators for export/import
+- Better validation and user feedback for destructive operations
+
+---
+
+### v1.1.0 (2025-12-08)
 
 #### What's New
 - ✅ **Improved Error Handling**: Better timeout management and error messages for large queries

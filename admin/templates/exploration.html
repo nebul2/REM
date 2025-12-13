@@ -35,6 +35,13 @@
                 <div class="chart-wrapper">
                     <canvas id="chartA"></canvas>
                 </div>
+                <div class="chart-scrollbar-container" id="scrollbarContainerA" style="display: none;">
+                    <input type="range" class="chart-scrollbar" id="chartAScrollbar" min="0" max="100" value="0" step="0.1">
+                    <div class="scrollbar-labels">
+                        <span id="scrollbarMinA">--</span>
+                        <span id="scrollbarMaxA">--</span>
+                    </div>
+                </div>
             </div>
             
             <!-- Chart B -->
@@ -55,6 +62,13 @@
                 </div>
                 <div class="chart-wrapper">
                     <canvas id="chartB"></canvas>
+                </div>
+                <div class="chart-scrollbar-container" id="scrollbarContainerB" style="display: none;">
+                    <input type="range" class="chart-scrollbar" id="chartBScrollbar" min="0" max="100" value="0" step="0.1">
+                    <div class="scrollbar-labels">
+                        <span id="scrollbarMinB">--</span>
+                        <span id="scrollbarMaxB">--</span>
+                    </div>
                 </div>
             </div>
         </section>

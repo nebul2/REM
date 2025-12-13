@@ -167,6 +167,13 @@ async function editExperiment(experimentId) {
     }
 }
 
+// Clear end time field
+function clearEndTime() {
+    document.getElementById('editExperimentEndTime').value = '';
+    // Also check the isCurrent checkbox when clearing end time
+    document.getElementById('editExperimentIsCurrent').checked = true;
+}
+
 // Update experiment
 async function updateExperiment(event) {
     event.preventDefault();
@@ -186,7 +193,19 @@ async function updateExperiment(event) {
         formData.append('name', name);
         if (description) formData.append('description', description);
         if (startTime) formData.append('start_time', new Date(startTime).toISOString());
-        if (endTime && !isCurrent) formData.append('end_time', new Date(endTime).toISOString());
+        
+        // Handle end_time: if isCurrent is checked, clear it by sending empty string
+        // Otherwise, send the endTime value if provided
+        if (isCurrent) {
+            // Clear end_time to make experiment current again
+            formData.append('end_time', '');
+        } else if (endTime) {
+            formData.append('end_time', new Date(endTime).toISOString());
+        }
+        
+        // Send is_current flag
+        formData.append('is_current', isCurrent);
+        
         if (linkedGroups) formData.append('linked_groups', linkedGroups);
         
         const response = await fetch(`/api/experiments/${encodeURIComponent(experimentId)}`, {

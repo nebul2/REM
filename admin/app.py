@@ -2,8 +2,8 @@
 GOS REM Data Exploration Tool - Complete Integrated Backend API
 Combines group management and data exploration functionality
 """
-from fastapi import FastAPI, Request, Form, HTTPException, Query
-from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
+from fastapi import FastAPI, Request, Form, HTTPException, Query, UploadFile, File
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, Response
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 import json
@@ -19,6 +19,9 @@ from psycopg2.extras import RealDictCursor
 import numpy as np
 import pandas as pd
 import base64
+import zipfile
+from io import BytesIO, StringIO
+import csv
 
 app = FastAPI(title="GOS REM Data Exploration Tool", root_path="")
 
@@ -674,6 +677,26 @@ async def manage_experiments(request: Request):
     return response
 
 
+@app.get("/admin", response_class=HTMLResponse)
+async def admin_page(request: Request):
+    """Admin page for data export/import"""
+    # Get base URL from request for navigation links (works behind proxy)
+    scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
+    host = request.headers.get("x-forwarded-host", request.headers.get("host", "localhost:7001"))
+    base_url = f"{scheme}://{host}"
+    
+    response = templates.TemplateResponse("admin.html", {
+        "request": request,
+        "css_content": load_all_css(),
+        "logo_data_uri": get_logo_data_uri(),
+        "base_url": base_url
+    })
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
+
+
 @app.get("/gallery", response_class=HTMLResponse)
 async def gallery(request: Request):
     """Snapshot gallery page"""
@@ -888,7 +911,8 @@ async def update_experiment(
     description: Optional[str] = Form(None),
     start_time: Optional[str] = Form(None),
     end_time: Optional[str] = Form(None),
-    linked_groups: Optional[str] = Form(None)
+    linked_groups: Optional[str] = Form(None),
+    is_current: Optional[bool] = Form(None)
 ):
     """Update an existing experiment"""
     experiments = load_experiments()
@@ -911,7 +935,15 @@ async def update_experiment(
         if start_time is not None:
             experiment["time_range"]["start"] = start_time or None
         if end_time is not None:
-            experiment["time_range"]["end"] = end_time or None
+            # If end_time is empty string, clear it (for reactivating current experiments)
+            if end_time == '':
+                experiment["time_range"]["end"] = None
+                experiment["is_current"] = True
+            else:
+                experiment["time_range"]["end"] = end_time
+                # If end_time is set, unset is_current
+                if end_time:
+                    experiment["is_current"] = False
         
         # Validate time range
         if experiment["time_range"].get("start") and experiment["time_range"].get("end"):
@@ -922,6 +954,15 @@ async def update_experiment(
                     raise HTTPException(status_code=400, detail="Start time must be before end time")
             except ValueError as e:
                 raise HTTPException(status_code=400, detail=f"Invalid time format: {e}")
+    
+    # Handle is_current flag explicitly if provided
+    if is_current is not None:
+        experiment["is_current"] = is_current
+        # If setting as current, ensure end_time is cleared
+        if is_current:
+            if experiment.get("time_range") is None:
+                experiment["time_range"] = {}
+            experiment["time_range"]["end"] = None
     
     # Update linked groups if provided
     if linked_groups is not None:
@@ -1245,6 +1286,126 @@ async def get_snapshot_image(snapshot_id: str):
     )
 
 
+@app.get("/api/snapshots/{snapshot_id}/download")
+async def download_snapshot_zip(snapshot_id: str):
+    """Download snapshot as ZIP file containing image and CSV data"""
+    snapshots = load_snapshots()
+    
+    if snapshot_id not in snapshots:
+        raise HTTPException(status_code=404, detail="Snapshot not found")
+    
+    snapshot = snapshots[snapshot_id]
+    
+    # Create ZIP in memory
+    zip_buffer = BytesIO()
+    
+    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+        # Add image file
+        image_filename = snapshot.get("image_path")
+        if image_filename:
+            image_path = SNAPSHOTS_DIR / image_filename
+            if image_path.exists():
+                zip_file.write(image_path, f"{snapshot.get('title', 'snapshot').replace('/', '_')}.png")
+        
+        # Generate and add CSV data
+        try:
+            time_range = snapshot.get("time_range", {})
+            devices = snapshot.get("group_members", [])
+            
+            start_time = time_range.get("start") if time_range else None
+            end_time = time_range.get("end") if time_range else None
+            
+            if start_time and end_time and devices:
+                # Query data from database
+                data_result = query_power_data(
+                    devices=devices,
+                    start_time=start_time,
+                    end_time=end_time,
+                    interval="1m",  # Use 1 minute interval for CSV
+                    timeout_seconds=60
+                )
+                
+                # Generate CSV with raw data (use StringIO for text, then encode to bytes)
+                csv_buffer = StringIO()
+                if data_result.get("data"):
+                    # Use devices from the query result (may differ from snapshot)
+                    csv_devices = data_result.get("devices", devices)
+                    fieldnames = ["timestamp"] + csv_devices
+                    writer = csv.DictWriter(csv_buffer, fieldnames=fieldnames)
+                    writer.writeheader()
+                    
+                    # Write raw data - handle None values as empty strings for CSV
+                    for point in data_result.get("data"):
+                        row = {"timestamp": point.get("timestamp", "")}
+                        for device in csv_devices:
+                            value = point.get(device)
+                            # Convert None to empty string, preserve numeric values
+                            if value is None:
+                                row[device] = ""
+                            else:
+                                row[device] = value
+                        writer.writerow(row)
+                    
+                    csv_buffer.seek(0)
+                    csv_filename = f"{snapshot.get('title', 'snapshot').replace('/', '_')}_data.csv"
+                    csv_content = csv_buffer.getvalue()
+                    csv_bytes = csv_content.encode('utf-8')
+                    zip_file.writestr(csv_filename, csv_bytes)
+            else:
+                missing = []
+                if not start_time: missing.append("start_time")
+                if not end_time: missing.append("end_time")
+                if not devices: missing.append("devices")
+                # Still create an empty CSV with headers to indicate the issue
+                csv_buffer = StringIO()
+                writer = csv.DictWriter(csv_buffer, fieldnames=["timestamp", "error"])
+                writer.writeheader()
+                writer.writerow({"timestamp": "", "error": f"Missing required data: {', '.join(missing)}"})
+                csv_buffer.seek(0)
+                csv_filename = f"{snapshot.get('title', 'snapshot').replace('/', '_')}_data.csv"
+                csv_content = csv_buffer.getvalue()
+                csv_bytes = csv_content.encode('utf-8')
+                zip_file.writestr(csv_filename, csv_bytes)
+        except Exception as e:
+            print(f"[CSV] Error generating CSV for snapshot {snapshot_id}: {e}")
+            import traceback
+            traceback.print_exc()
+            # Continue even if CSV generation fails
+        
+        # Add metadata file (JSON)
+        metadata = {
+            "title": snapshot.get("title", ""),
+            "experiment_id": snapshot.get("experiment_id", ""),
+            "experiment_name": snapshot.get("experiment_name", ""),
+            "description": snapshot.get("description", ""),
+            "time_range": snapshot.get("time_range", {}),
+            "created_at": snapshot.get("created_at", ""),
+            "energy_stats": snapshot.get("energy_stats", {})
+        }
+        zip_file.writestr(
+            f"{snapshot.get('title', 'snapshot').replace('/', '_')}_metadata.json",
+            json.dumps(metadata, indent=2)
+        )
+    
+    zip_buffer.seek(0)
+    zip_data = zip_buffer.getvalue()
+    
+    # Generate filename
+    safe_title = re.sub(r'[^\w\s-]', '', snapshot.get("title", "snapshot"))
+    safe_title = re.sub(r'[-\s]+', '-', safe_title)
+    filename = f"{safe_title}-{snapshot_id[:8]}.zip"
+    
+    # Use Response for in-memory content
+    return Response(
+        content=zip_data,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f"attachment; filename=\"{filename}\"",
+            "Cache-Control": "no-cache"
+        }
+    )
+
+
 @app.delete("/api/snapshots/{snapshot_id}")
 async def delete_snapshot(snapshot_id: str):
     """Delete a snapshot"""
@@ -1363,6 +1524,340 @@ async def control_collector(
 # ============================================================================
 # API Endpoint - Static Files (Bypass Auth)
 # ============================================================================
+
+@app.get("/api/admin/export")
+async def export_database():
+    """Export complete database backup as ZIP file"""
+    import tempfile
+    import shutil
+    
+    temp_dir = None
+    try:
+        # Create temporary directory for export files
+        temp_dir = tempfile.mkdtemp()
+        temp_path = Path(temp_dir)
+        
+        # 1. Export PostgreSQL database dump
+        dump_file = temp_path / "database.dump"
+        pg_dump_available = False
+        
+        try:
+            # Try to use pg_dump if available
+            pg_dump_cmd = [
+                "pg_dump",
+                f"-h{POSTGRES_HOST}",
+                f"-p{POSTGRES_PORT}",
+                f"-U{POSTGRES_USER}",
+                f"-d{POSTGRES_DB}",
+                "-Fc",  # Custom format (compressed)
+                f"-f{dump_file}"
+            ]
+            env = os.environ.copy()
+            env["PGPASSWORD"] = POSTGRES_PASSWORD
+            
+            result = subprocess.run(
+                pg_dump_cmd,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=600  # 10 minute timeout
+            )
+            
+            if result.returncode == 0 and dump_file.exists() and dump_file.stat().st_size > 0:
+                pg_dump_available = True
+                print("Database exported using pg_dump")
+        except (subprocess.TimeoutExpired, FileNotFoundError, Exception) as e:
+            print(f"pg_dump not available or failed: {e}")
+            pg_dump_available = False
+        
+        # Fallback: export data using psycopg2
+        if not pg_dump_available:
+            dump_file = temp_path / "database.csv"
+            sql_file = temp_path / "database_schema.sql"
+            try:
+                print("Using custom export via psycopg2")
+                conn = get_db_connection()
+                try:
+                    with conn.cursor() as cur:
+                        # Check if table exists
+                        cur.execute("""
+                            SELECT EXISTS (
+                                SELECT FROM information_schema.tables 
+                                WHERE table_schema = 'public' 
+                                AND table_name = 'gos_rem'
+                            )
+                        """)
+                        table_exists = cur.fetchone()[0]
+                        
+                        if table_exists:
+                            # Export schema to SQL file
+                            with open(sql_file, 'w') as f:
+                                f.write("-- GOS REM Database Schema Export\n")
+                                f.write("-- Generated: " + datetime.utcnow().isoformat() + "\n\n")
+                                f.write("DROP TABLE IF EXISTS gos_rem CASCADE;\n\n")
+                                f.write("CREATE TABLE gos_rem (\n")
+                                f.write("    time TIMESTAMPTZ NOT NULL,\n")
+                                f.write("    alias TEXT NOT NULL,\n")
+                                f.write("    power_watts FLOAT NOT NULL\n")
+                                f.write(");\n\n")
+                                f.write("SELECT create_hypertable('gos_rem', 'time');\n\n")
+                                f.write("-- Data will be imported from database.csv using:\n")
+                                f.write("-- COPY gos_rem FROM '/path/to/database.csv' WITH CSV HEADER;\n")
+                            
+                            # Export data to CSV using COPY
+                            with open(dump_file, 'w') as f:
+                                cur.copy_expert("COPY gos_rem TO STDOUT WITH CSV HEADER", f)
+                            
+                            print("Database exported using custom CSV export")
+                        else:
+                            # Create empty files if table doesn't exist
+                            with open(sql_file, 'w') as f:
+                                f.write("-- No data to export\n")
+                            with open(dump_file, 'w') as f:
+                                f.write("time,alias,power_watts\n")
+                            print("Table does not exist, created empty export files")
+                finally:
+                    conn.close()
+            except Exception as e:
+                print(f"Error in custom export: {e}")
+                import traceback
+                traceback.print_exc()
+                raise HTTPException(status_code=500, detail=f"Database export failed: {str(e)}")
+        
+        # 2. Copy JSON metadata files
+        if GROUPS_FILE.exists():
+            shutil.copy(GROUPS_FILE, temp_path / "device_groups.json")
+        if EXPERIMENTS_FILE.exists():
+            shutil.copy(EXPERIMENTS_FILE, temp_path / "experiments.json")
+        if ANNOTATIONS_FILE.exists():
+            shutil.copy(ANNOTATIONS_FILE, temp_path / "annotations.json")
+        if SNAPSHOTS_FILE.exists():
+            shutil.copy(SNAPSHOTS_FILE, temp_path / "snapshots.json")
+        
+        # 3. Copy snapshot images directory
+        if SNAPSHOTS_DIR.exists():
+            export_snapshots_dir = temp_path / "snapshots"
+            shutil.copytree(SNAPSHOTS_DIR, export_snapshots_dir)
+        
+        # 4. Create manifest/metadata file
+        # Determine dump file name for manifest
+        dump_files_list = []
+        if pg_dump_available:
+            dump_files_list.append("database.dump")
+        else:
+            dump_files_list.extend(["database.csv", "database_schema.sql"])
+        
+        manifest = {
+            "export_version": "1.0",
+            "export_date": datetime.utcnow().isoformat(),
+            "database": POSTGRES_DB,
+            "export_format": "pg_dump" if pg_dump_available else "csv",
+            "files": {
+                "database_files": dump_files_list,
+                "groups": "device_groups.json" if GROUPS_FILE.exists() else None,
+                "experiments": "experiments.json" if EXPERIMENTS_FILE.exists() else None,
+                "annotations": "annotations.json" if ANNOTATIONS_FILE.exists() else None,
+                "snapshots_metadata": "snapshots.json" if SNAPSHOTS_FILE.exists() else None,
+                "snapshots_dir": "snapshots" if SNAPSHOTS_DIR.exists() else None
+            }
+        }
+        with open(temp_path / "manifest.json", 'w') as f:
+            json.dump(manifest, f, indent=2)
+        
+        # 5. Create ZIP file in memory
+        zip_buffer = BytesIO()
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+            for file_path in temp_path.rglob('*'):
+                if file_path.is_file():
+                    arcname = file_path.relative_to(temp_path)
+                    zip_file.write(file_path, arcname=str(arcname))
+        
+        zip_buffer.seek(0)
+        
+        # Generate filename
+        timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+        filename = f"gos-rem-export-{timestamp}.zip"
+        
+        return Response(
+            content=zip_buffer.getvalue(),
+            media_type="application/zip",
+            headers={
+                "Content-Disposition": f"attachment; filename=\"{filename}\"",
+                "Cache-Control": "no-cache"
+            }
+        )
+        
+    except Exception as e:
+        print(f"Export error: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")
+    finally:
+        # Clean up temporary directory
+        if temp_dir and Path(temp_dir).exists():
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+@app.post("/api/admin/import")
+async def import_database(file: UploadFile = File(...)):
+    """Import database backup from ZIP file"""
+    import tempfile
+    import shutil
+    
+    temp_dir = None
+    try:
+        # Validate file type
+        if not file.filename.endswith('.zip'):
+            raise HTTPException(status_code=400, detail="File must be a ZIP archive")
+        
+        # Create temporary directory for import files
+        temp_dir = tempfile.mkdtemp()
+        temp_path = Path(temp_dir)
+        zip_path = temp_path / file.filename
+        
+        # Save uploaded file
+        with open(zip_path, 'wb') as f:
+            content = await file.read()
+            f.write(content)
+        
+        # Extract ZIP file
+        with zipfile.ZipFile(zip_path, 'r') as zip_file:
+            zip_file.extractall(temp_path)
+        
+        # Read manifest
+        manifest_path = temp_path / "manifest.json"
+        if not manifest_path.exists():
+            raise HTTPException(status_code=400, detail="Invalid export file: manifest.json not found")
+        
+        with open(manifest_path) as f:
+            manifest = json.load(f)
+        
+        # 1. Restore database dump
+        dump_file = temp_path / "database.dump"
+        csv_file = temp_path / "database.csv"
+        sql_file = temp_path / "database_schema.sql"
+        
+        try:
+            if dump_file.exists():
+                # Custom format dump - use pg_restore
+                pg_restore_cmd = [
+                    "pg_restore",
+                    f"-h{POSTGRES_HOST}",
+                    f"-p{POSTGRES_PORT}",
+                    f"-U{POSTGRES_USER}",
+                    f"-d{POSTGRES_DB}",
+                    "--clean",  # Drop objects before creating
+                    "--if-exists",  # Don't error if object doesn't exist
+                    str(dump_file)
+                ]
+                env = os.environ.copy()
+                env["PGPASSWORD"] = POSTGRES_PASSWORD
+                
+                result = subprocess.run(
+                    pg_restore_cmd,
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    timeout=600
+                )
+                
+                if result.returncode != 0:
+                    raise Exception(f"pg_restore failed: {result.stderr}")
+                    
+            elif csv_file.exists() and sql_file.exists():
+                # CSV export format - restore schema first, then data
+                # First, restore schema
+                psql_cmd = [
+                    "psql",
+                    f"-h{POSTGRES_HOST}",
+                    f"-p{POSTGRES_PORT}",
+                    f"-U{POSTGRES_USER}",
+                    f"-d{POSTGRES_DB}",
+                    "-f", str(sql_file)
+                ]
+                env = os.environ.copy()
+                env["PGPASSWORD"] = POSTGRES_PASSWORD
+                
+                result = subprocess.run(
+                    psql_cmd,
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    timeout=600
+                )
+                
+                if result.returncode != 0:
+                    raise Exception(f"Schema restore failed: {result.stderr}")
+                
+                # Then, restore data from CSV
+                conn = get_db_connection()
+                try:
+                    with conn.cursor() as cur:
+                        with open(csv_file, 'r') as f:
+                            cur.copy_expert("COPY gos_rem FROM STDIN WITH CSV HEADER", f)
+                    conn.commit()
+                finally:
+                    conn.close()
+                    
+        except subprocess.TimeoutExpired:
+            raise HTTPException(status_code=500, detail="Database restore timeout")
+        except Exception as e:
+            print(f"Error restoring database: {e}")
+            import traceback
+            traceback.print_exc()
+            raise HTTPException(status_code=500, detail=f"Database restore failed: {str(e)}")
+        
+        # 2. Restore JSON metadata files
+        experiments_count = 0
+        groups_count = 0
+        snapshots_count = 0
+        
+        if (temp_path / "experiments.json").exists():
+            shutil.copy(temp_path / "experiments.json", EXPERIMENTS_FILE)
+            experiments = load_experiments()
+            experiments_count = len(experiments)
+        
+        if (temp_path / "device_groups.json").exists():
+            shutil.copy(temp_path / "device_groups.json", GROUPS_FILE)
+            groups = load_groups()
+            groups_count = len(groups)
+        
+        if (temp_path / "annotations.json").exists():
+            shutil.copy(temp_path / "annotations.json", ANNOTATIONS_FILE)
+        
+        if (temp_path / "snapshots.json").exists():
+            shutil.copy(temp_path / "snapshots.json", SNAPSHOTS_FILE)
+            snapshots = load_snapshots()
+            snapshots_count = len(snapshots)
+        
+        # 3. Restore snapshot images directory
+        import_snapshots_dir = temp_path / "snapshots"
+        if import_snapshots_dir.exists() and import_snapshots_dir.is_dir():
+            # Clear existing snapshots directory and restore
+            if SNAPSHOTS_DIR.exists():
+                shutil.rmtree(SNAPSHOTS_DIR)
+            shutil.copytree(import_snapshots_dir, SNAPSHOTS_DIR)
+        
+        return JSONResponse(content={
+            "success": True,
+            "message": "Import completed successfully",
+            "experiments_count": experiments_count,
+            "groups_count": groups_count,
+            "snapshots_count": snapshots_count
+        })
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Import error: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Import failed: {str(e)}")
+    finally:
+        # Clean up temporary directory
+        if temp_dir and Path(temp_dir).exists():
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
 
 @app.get("/api/static/{file_path:path}")
 async def serve_static_file(file_path: str):

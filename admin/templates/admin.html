@@ -1,0 +1,389 @@
+{% extends "base.html" %}
+
+{% block title %}Admin - Data Export/Import - GOS REM{% endblock %}
+
+{% block page_subtitle %}Admin - Data Management{% endblock %}
+
+{% block nav_admin_active %}active{% endblock %}
+
+{% block extra_head %}
+<style>
+    .admin-section {
+        margin-bottom: 2rem;
+    }
+    .admin-section h2 {
+        margin-bottom: 1rem;
+        color: var(--gos-blue);
+    }
+    .admin-card {
+        background: white;
+        border-radius: 8px;
+        padding: 1.5rem;
+        margin-bottom: 1rem;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .admin-card h3 {
+        margin-top: 0;
+        margin-bottom: 1rem;
+    }
+    .admin-card p {
+        color: #666;
+        margin-bottom: 1rem;
+    }
+    .export-info, .import-info {
+        background: #f5f5f5;
+        padding: 1rem;
+        border-radius: 4px;
+        margin-bottom: 1rem;
+        font-size: 0.9rem;
+    }
+    .export-info ul, .import-info ul {
+        margin: 0.5rem 0 0 1.5rem;
+    }
+    .btn-export, .btn-import {
+        padding: 0.75rem 1.5rem;
+        font-size: 1rem;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-weight: 500;
+    }
+    .btn-export {
+        background: var(--gos-blue);
+        color: white;
+    }
+    .btn-export:hover {
+        background: #0056b3;
+    }
+    .btn-export:disabled {
+        background: #ccc;
+        cursor: not-allowed;
+    }
+    .btn-import {
+        background: #28a745;
+        color: white;
+    }
+    .btn-import:hover {
+        background: #218838;
+    }
+    .btn-import:disabled {
+        background: #ccc;
+        cursor: not-allowed;
+    }
+    .file-input-wrapper {
+        margin: 1rem 0;
+    }
+    .file-input-wrapper input[type="file"] {
+        padding: 0.5rem;
+        border: 2px dashed #ccc;
+        border-radius: 4px;
+        width: 100%;
+        max-width: 500px;
+    }
+    .progress-bar {
+        width: 100%;
+        height: 20px;
+        background: #f0f0f0;
+        border-radius: 10px;
+        overflow: hidden;
+        margin: 1rem 0;
+        display: none;
+    }
+    .progress-bar.active {
+        display: block;
+    }
+    .progress-fill {
+        height: 100%;
+        background: var(--gos-blue);
+        width: 0%;
+        transition: width 0.3s;
+    }
+    .status-message {
+        margin: 1rem 0;
+        padding: 1rem;
+        border-radius: 4px;
+        display: none;
+    }
+    .status-message.success {
+        background: #d4edda;
+        color: #155724;
+        border: 1px solid #c3e6cb;
+        display: block;
+    }
+    .status-message.error {
+        background: #f8d7da;
+        color: #721c24;
+        border: 1px solid #f5c6cb;
+        display: block;
+    }
+    .status-message.info {
+        background: #d1ecf1;
+        color: #0c5460;
+        border: 1px solid #bee5eb;
+        display: block;
+    }
+    .warning-box {
+        background: #fff3cd;
+        border: 1px solid #ffc107;
+        color: #856404;
+        padding: 1rem;
+        border-radius: 4px;
+        margin: 1rem 0;
+    }
+    .warning-box strong {
+        display: block;
+        margin-bottom: 0.5rem;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+    <div class="container">
+        <div class="admin-section">
+            <h2>Data Export & Import</h2>
+            <p>Export your complete GOS REM database for backup or migration to a new instance. Import a previously exported backup to restore all data, experiments, groups, and snapshots.</p>
+
+            <!-- Export Section -->
+            <div class="admin-card">
+                <h3>Export Database</h3>
+                <p>Export all data including:</p>
+                <div class="export-info">
+                    <ul>
+                        <li><strong>TimescaleDB data</strong> - All power measurements and time-series data</li>
+                        <li><strong>Experiments</strong> - All experiment definitions and configurations</li>
+                        <li><strong>Device Groups</strong> - All device group definitions</li>
+                        <li><strong>Snapshots</strong> - All snapshot images and metadata</li>
+                    </ul>
+                    <p><strong>Note:</strong> The export may take several minutes for large databases. The download will start automatically when ready.</p>
+                </div>
+                <div class="progress-bar" id="exportProgress">
+                    <div class="progress-fill" id="exportProgressFill"></div>
+                </div>
+                <div class="status-message" id="exportStatus"></div>
+                <button class="btn-export" id="exportBtn" onclick="exportDatabase()">Export Database</button>
+            </div>
+
+            <!-- Import Section -->
+            <div class="admin-card">
+                <h3>Import Database</h3>
+                <p>Import a previously exported backup file to restore all data.</p>
+                <div class="warning-box">
+                    <strong>⚠️ Warning</strong>
+                    Importing will <strong>replace</strong> all existing data, experiments, groups, and snapshots with the imported data. This action cannot be undone. Make sure to export your current data first if you want to keep it.
+                </div>
+                <div class="import-info">
+                    <p>The import file should be a ZIP file created by the Export function, containing:</p>
+                    <ul>
+                        <li>PostgreSQL database dump</li>
+                        <li>Experiments JSON file</li>
+                        <li>Device groups JSON file</li>
+                        <li>Snapshots directory</li>
+                        <li>Metadata/manifest file</li>
+                    </ul>
+                </div>
+                <div class="file-input-wrapper">
+                    <input type="file" id="importFile" accept=".zip" onchange="handleFileSelect(event)">
+                </div>
+                <div class="progress-bar" id="importProgress">
+                    <div class="progress-fill" id="importProgressFill"></div>
+                </div>
+                <div class="status-message" id="importStatus"></div>
+                <button class="btn-import" id="importBtn" onclick="importDatabase()" disabled>Import Database</button>
+            </div>
+        </div>
+    </div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+let selectedFile = null;
+
+function handleFileSelect(event) {
+    const file = event.target.files[0];
+    if (file) {
+        selectedFile = file;
+        document.getElementById('importBtn').disabled = false;
+        document.getElementById('importStatus').className = 'status-message info';
+        document.getElementById('importStatus').textContent = `Selected: ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`;
+        document.getElementById('importStatus').style.display = 'block';
+    } else {
+        selectedFile = null;
+        document.getElementById('importBtn').disabled = true;
+        document.getElementById('importStatus').style.display = 'none';
+    }
+}
+
+async function exportDatabase() {
+    const btn = document.getElementById('exportBtn');
+    const progressBar = document.getElementById('exportProgress');
+    const progressFill = document.getElementById('exportProgressFill');
+    const statusMsg = document.getElementById('exportStatus');
+    
+    btn.disabled = true;
+    btn.textContent = 'Exporting...';
+    progressBar.classList.add('active');
+    progressFill.style.width = '30%';
+    statusMsg.className = 'status-message info';
+    statusMsg.textContent = 'Starting export... This may take several minutes for large databases.';
+    statusMsg.style.display = 'block';
+    
+    try {
+        progressFill.style.width = '50%';
+        statusMsg.textContent = 'Creating database dump...';
+        
+        const response = await fetch('/api/admin/export', {
+            method: 'GET'
+        });
+        
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Export failed: ${response.status} ${errorText}`);
+        }
+        
+        progressFill.style.width = '80%';
+        statusMsg.textContent = 'Packaging export file...';
+        
+        const blob = await response.blob();
+        if (!blob || blob.size === 0) {
+            throw new Error('Received empty export file');
+        }
+        
+        progressFill.style.width = '100%';
+        statusMsg.textContent = 'Download starting...';
+        
+        // Get filename from Content-Disposition header
+        const contentDisposition = response.headers.get('Content-Disposition');
+        let filename = 'gos-rem-export.zip';
+        if (contentDisposition) {
+            const filenameMatch = contentDisposition.match(/filename="?([^"]+)"?/i);
+            if (filenameMatch) {
+                filename = filenameMatch[1];
+            }
+        }
+        
+        // Create download link
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.style.display = 'none';
+        document.body.appendChild(a);
+        a.click();
+        
+        setTimeout(() => {
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+        }, 100);
+        
+        statusMsg.className = 'status-message success';
+        statusMsg.textContent = `Export completed successfully! File: ${filename} (${(blob.size / 1024 / 1024).toFixed(2)} MB)`;
+        
+        // Reset after 3 seconds
+        setTimeout(() => {
+            progressBar.classList.remove('active');
+            progressFill.style.width = '0%';
+            btn.disabled = false;
+            btn.textContent = 'Export Database';
+        }, 3000);
+        
+    } catch (error) {
+        console.error('Export error:', error);
+        statusMsg.className = 'status-message error';
+        statusMsg.textContent = `Export failed: ${error.message}. Please check the console for details.`;
+        progressBar.classList.remove('active');
+        progressFill.style.width = '0%';
+        btn.disabled = false;
+        btn.textContent = 'Export Database';
+    }
+}
+
+async function importDatabase() {
+    if (!selectedFile) {
+        alert('Please select a file first');
+        return;
+    }
+    
+    if (!confirm('⚠️ WARNING: This will replace ALL existing data, experiments, groups, and snapshots with the imported data. This cannot be undone.\n\nAre you sure you want to continue?')) {
+        return;
+    }
+    
+    const btn = document.getElementById('importBtn');
+    const progressBar = document.getElementById('importProgress');
+    const progressFill = document.getElementById('importProgressFill');
+    const statusMsg = document.getElementById('importStatus');
+    
+    btn.disabled = true;
+    btn.textContent = 'Importing...';
+    progressBar.classList.add('active');
+    progressFill.style.width = '20%';
+    statusMsg.className = 'status-message info';
+    statusMsg.textContent = 'Uploading file...';
+    statusMsg.style.display = 'block';
+    
+    try {
+        const formData = new FormData();
+        formData.append('file', selectedFile);
+        
+        progressFill.style.width = '40%';
+        statusMsg.textContent = 'Processing import file...';
+        
+        const response = await fetch('/api/admin/import', {
+            method: 'POST',
+            body: formData
+        });
+        
+        progressFill.style.width = '60%';
+        statusMsg.textContent = 'Restoring database...';
+        
+        if (!response.ok) {
+            let errorText = '';
+            try {
+                const contentType = response.headers.get('content-type');
+                if (contentType && contentType.includes('application/json')) {
+                    const errorJson = await response.json();
+                    errorText = errorJson.detail || errorJson.message || JSON.stringify(errorJson);
+                } else {
+                    errorText = await response.text();
+                }
+            } catch (e) {
+                errorText = response.statusText || 'Unknown error';
+            }
+            throw new Error(`Import failed: ${response.status} ${errorText}`);
+        }
+        
+        progressFill.style.width = '80%';
+        statusMsg.textContent = 'Importing metadata...';
+        
+        const result = await response.json();
+        
+        progressFill.style.width = '100%';
+        statusMsg.className = 'status-message success';
+        statusMsg.textContent = `Import completed successfully! Restored ${result.experiments_count || 0} experiments, ${result.groups_count || 0} groups, and ${result.snapshots_count || 0} snapshots.`;
+        
+        // Reset after 5 seconds
+        setTimeout(() => {
+            progressBar.classList.remove('active');
+            progressFill.style.width = '0%';
+            btn.disabled = false;
+            btn.textContent = 'Import Database';
+            document.getElementById('importFile').value = '';
+            selectedFile = null;
+            // Optionally reload the page to show new data
+            setTimeout(() => {
+                window.location.reload();
+            }, 2000);
+        }, 5000);
+        
+    } catch (error) {
+        console.error('Import error:', error);
+        statusMsg.className = 'status-message error';
+        statusMsg.textContent = `Import failed: ${error.message}. Please check the console for details.`;
+        progressBar.classList.remove('active');
+        progressFill.style.width = '0%';
+        btn.disabled = false;
+        btn.textContent = 'Import Database';
+    }
+}
+</script>
+{% endblock %}
+
