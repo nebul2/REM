@@ -138,6 +138,19 @@ def getDevicePowerList(deviceIdList, accessToken, config, db_conn):
     points_buffer = []
     failed_devices = []
     
+    # Rate limit delay between device queries (seconds) to avoid API throttling
+    # Read from collector control file if available, otherwise use config or default
+    device_query_delay = 0.5  # Default
+    control_file = "/app/data/collector_control.json"
+    try:
+        if os.path.exists(control_file):
+            import json
+            with open(control_file, 'r') as f:
+                control = json.load(f)
+                device_query_delay = control.get("device_query_delay", 0.5)
+    except Exception as e:
+        logger.warning(f"Could not read device_query_delay from control file: {e}")
+    
     #walk through each device reading power
     for item in deviceIdList:
         device_id = item['deviceId']
@@ -148,6 +161,8 @@ def getDevicePowerList(deviceIdList, accessToken, config, db_conn):
         # Skip devices that failed to respond
         if devPower is None:
             failed_devices.append(alias)
+            if device_query_delay > 0:
+                time.sleep(device_query_delay)  # Still delay to avoid hammering API on failures
             continue
         
         current_GMT = time.gmtime()
@@ -159,6 +174,10 @@ def getDevicePowerList(deviceIdList, accessToken, config, db_conn):
             'power_watts': float(devPower),
             'time': timestamp
         })
+        
+        # Rate limit: delay between device queries to avoid API throttling (429 errors)
+        if device_query_delay > 0:
+            time.sleep(device_query_delay)
     
     # Log summary of polling results
     successful_count = len(points_buffer)

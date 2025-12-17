@@ -149,12 +149,20 @@ View and control the data collection service:
 - **Status Indicator**: Green dot = Running, Red dot = Stopped
 - **Current Polling Interval**: Shows how often data is collected (in seconds)
 - **Enable/Disable**: Start or stop data collection
-- **Set Polling Frequency**: Adjust collection interval (10-300 seconds)
+- **Set Polling Frequency**: Adjust collection interval (5-300 seconds)
+- **Device Query Delay**: Time between individual device API calls (0-5 seconds)
 
-**Recommendations**:
+**Polling Frequency Recommendations**:
 - 30 seconds: Standard rate (recommended)
 - 10 seconds: High-frequency monitoring (may hit API limits)
 - 60+ seconds: Lower frequency (saves API quota)
+
+**Device Query Delay Recommendations**:
+- 0.5 seconds: Recommended default - prevents API rate limiting
+- 0 seconds: Rapid-fire mode (risk of 429 rate limit errors)
+- 1+ seconds: Conservative mode for many devices
+
+The device query delay adds a pause between each device's API call. With ~30+ devices, this spreads the load and prevents TP-Link's API from returning "429 Too Many Requests" errors.
 
 ## Device Groups Management
 

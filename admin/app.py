@@ -1443,9 +1443,9 @@ async def get_collector_status():
             with open(COLLECTOR_CONTROL_FILE, 'r') as f:
                 control = json.load(f)
         except:
-            control = {"enabled": True, "poll_interval": 30}
+            control = {"enabled": True, "poll_interval": 30, "device_query_delay": 0.5}
     else:
-        control = {"enabled": True, "poll_interval": 30}
+        control = {"enabled": True, "poll_interval": 30, "device_query_delay": 0.5}
     
     # Check if collector is actually running by checking for recent data
     # If there's data in the last 2 minutes, the collector is running
@@ -1470,6 +1470,7 @@ async def get_collector_status():
     return JSONResponse(content={
         "enabled": control.get("enabled", True),
         "poll_interval": control.get("poll_interval", 30),
+        "device_query_delay": control.get("device_query_delay", 0.5),
         "running": running
     })
 
@@ -1477,7 +1478,8 @@ async def get_collector_status():
 @app.post("/api/collector/control")
 async def control_collector(
     enabled: Optional[bool] = Form(None),
-    poll_interval: Optional[int] = Form(None)
+    poll_interval: Optional[int] = Form(None),
+    device_query_delay: Optional[float] = Form(None)
 ):
     """Control collector settings"""
     # Load current settings
@@ -1486,9 +1488,9 @@ async def control_collector(
             with open(COLLECTOR_CONTROL_FILE, 'r') as f:
                 control = json.load(f)
         except:
-            control = {"enabled": True, "poll_interval": 30}
+            control = {"enabled": True, "poll_interval": 30, "device_query_delay": 0.5}
     else:
-        control = {"enabled": True, "poll_interval": 30}
+        control = {"enabled": True, "poll_interval": 30, "device_query_delay": 0.5}
     
     # Update settings
     if enabled is not None:
@@ -1497,6 +1499,10 @@ async def control_collector(
         if poll_interval < 5 or poll_interval > 300:
             raise HTTPException(status_code=400, detail="Poll interval must be between 5 and 300 seconds")
         control["poll_interval"] = poll_interval
+    if device_query_delay is not None:
+        if device_query_delay < 0 or device_query_delay > 5:
+            raise HTTPException(status_code=400, detail="Device query delay must be between 0 and 5 seconds")
+        control["device_query_delay"] = device_query_delay
     
     # Save settings
     try:

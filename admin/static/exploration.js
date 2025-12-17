@@ -448,6 +448,15 @@ function setupEventListeners() {
         }
     });
     
+    document.getElementById('updateDeviceQueryDelay').addEventListener('click', async () => {
+        const delay = parseFloat(document.getElementById('deviceQueryDelay').value);
+        if (delay >= 0 && delay <= 5) {
+            await updateDeviceQueryDelay(delay);
+        } else {
+            alert('Device query delay must be between 0 and 5 seconds');
+        }
+    });
+    
     // Load collector status on page load
     loadCollectorStatus();
     
@@ -2952,6 +2961,18 @@ async function loadCollectorStatus() {
         if (pollIntervalInput) {
             pollIntervalInput.value = data.poll_interval || 30;
         }
+        
+        // Device query delay
+        const currentDeviceQueryDelay = document.getElementById('currentDeviceQueryDelay');
+        const deviceQueryDelayInput = document.getElementById('deviceQueryDelay');
+        
+        if (currentDeviceQueryDelay) {
+            currentDeviceQueryDelay.textContent = data.device_query_delay ?? 0.5;
+        }
+        
+        if (deviceQueryDelayInput) {
+            deviceQueryDelayInput.value = data.device_query_delay ?? 0.5;
+        }
     } catch (error) {
         // Silently fail for collector status - don't spam console
         // Only log if it's not a network/timeout error
@@ -3027,6 +3048,44 @@ async function updatePollInterval(interval) {
     } catch (error) {
         console.error('Error updating poll interval:', error);
         alert('Error updating polling interval: ' + error.message);
+    }
+}
+
+async function updateDeviceQueryDelay(delay) {
+    try {
+        const formData = new FormData();
+        formData.append('device_query_delay', delay);
+        
+        const response = await fetch('/api/collector/control', {
+            method: 'POST',
+            body: formData
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            // Update status display
+            await loadCollectorStatus();
+            
+            // Show feedback
+            const currentDeviceQueryDelay = document.getElementById('currentDeviceQueryDelay');
+            if (currentDeviceQueryDelay) {
+                currentDeviceQueryDelay.textContent = delay;
+                currentDeviceQueryDelay.style.color = '#27ae60';
+                setTimeout(() => {
+                    if (currentDeviceQueryDelay) {
+                        currentDeviceQueryDelay.style.color = '';
+                    }
+                }, 2000);
+            }
+            
+            alert(`Device query delay updated to ${delay} seconds. Collector will restart with new settings.`);
+        } else {
+            alert('Failed to update device query delay');
+        }
+    } catch (error) {
+        console.error('Error updating device query delay:', error);
+        alert('Error updating device query delay: ' + error.message);
     }
 }
 

@@ -5,6 +5,20 @@ All notable changes to the GOS REM system will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.1] - 2025-12-17
+
+### Added
+- Device Query Delay setting in UI (configurable 0-5 seconds between API calls)
+- Prevents TP-Link API rate limiting (429 errors) with configurable delay
+
+### Fixed
+- Collector hanging after API rate limit errors (now recoverable)
+- Data collection gap caused by rate limiting on Dec 15-17
+
+### Changed
+- Default device query delay set to 0.5 seconds
+- Collector now reads delay setting from control file dynamically
+
 ## [1.3.0] - 2025-12-13
 
 ### Added

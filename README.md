@@ -541,7 +541,14 @@ TBD - To be determined with GOS team
 
 ## Release Notes
 
-### v1.3.0 (Current Release - 2025-12-13)
+### v1.3.1 (Current Release - 2025-12-17)
+
+**Stability Update** - API rate limiting fix:
+- Added configurable Device Query Delay setting in UI
+- Prevents TP-Link API rate limiting (429 errors)
+- Fixed collector hanging after rate limit errors
+
+### v1.3.0 (2025-12-13)
 
 **User Feedback Release** - Based on feedback from Ben:
 - Added horizontal scrollbar for zoomed charts
