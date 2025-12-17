@@ -5,6 +5,18 @@ All notable changes to the GOS REM system will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.2] - 2025-12-17
+
+### Removed
+- Grafana service (no longer used - replaced by custom admin UI)
+- InfluxDB service and native installation (migrated to TimescaleDB)
+- All Grafana-related configuration and documentation
+
+### Changed
+- Cleaned up docker-compose.yml to remove unused services
+- Updated documentation to reflect TimescaleDB-only architecture
+- Freed ~6GB disk space on production server (removed orphaned Docker images and old InfluxDB data)
+
 ## [1.3.1] - 2025-12-17
 
 ### Added

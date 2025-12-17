@@ -50,7 +50,6 @@ You'll need:
    TPLINK_CLIENT_SECRET=your-secret-here
    TPLINK_REFRESH_TOKEN=your-refresh-token-here
    POSTGRES_PASSWORD=choose-a-secure-password
-   GRAFANA_ADMIN_PASSWORD=choose-a-secure-password
    ```
 
 ### Step 4: Start Everything
@@ -69,7 +68,6 @@ All services should show "Up" status.
 ### Step 5: Access the System
 Open your web browser and go to:
 - **Main Interface**: http://localhost:7001
-- (Optional) **Grafana Dashboard**: http://localhost:7003
 
 ### Step 6: View Your Data
 1. The system will automatically start collecting data from your TP-Link devices
@@ -449,8 +447,7 @@ This project is part of the Greening of Streaming organization's research initia
 - [ ] Test local deployment
 
 ### Phase 2: Enhanced Features (Week 2)
-- [ ] Advanced Grafana dashboards
-- [ ] Configurable polling
+- [x] Configurable polling
 - [ ] Data retention policies
 - [ ] Backup automation
 
@@ -476,10 +473,9 @@ This project is part of the Greening of Streaming organization's research initia
 - **Total**: ~$7/month
 
 ### Cloud Services
-- InfluxDB Cloud: $0-50/month
-- Grafana Cloud: $0-49/month
+- TimescaleDB Cloud: $0-50/month
 - Cloud Run: $0-5/month
-- **Total**: $0-100/month
+- **Total**: $0-55/month
 
 **Recommendation**: Self-hosted for cost control
 
@@ -489,14 +485,12 @@ This project is part of the Greening of Streaming organization's research initia
 
 ### Secrets Management
 - OAuth credentials in environment variables
-- InfluxDB token in Docker secrets
-- Grafana admin password auto-generated
+- PostgreSQL/TimescaleDB password in environment variables
 - No secrets in Git repository
 
 ### Network Security
-- InfluxDB not exposed publicly
-- Grafana behind authentication
-- Admin UI (when built) behind auth
+- TimescaleDB not exposed publicly
+- Admin UI behind authentication (via Traefik/Authelia)
 - HTTPS for public interfaces
 
 ---
@@ -505,8 +499,8 @@ This project is part of the Greening of Streaming organization's research initia
 
 ### Documentation
 - [TP-Link Cloud API](https://www.tp-link.com/uk/support/download/tapo-p110/)
-- [InfluxDB 2.x Docs](https://docs.influxdata.com/influxdb/v2/)
-- [Grafana Docs](https://grafana.com/docs/)
+- [TimescaleDB Docs](https://docs.timescale.com/)
+- [PostgreSQL Docs](https://www.postgresql.org/docs/)
 
 ### Related Projects
 - [bentasker/tplink_to_influxdb](https://github.com/bentasker/tplink_to_influxdb) - Original inspiration
@@ -541,7 +535,14 @@ TBD - To be determined with GOS team
 
 ## Release Notes
 
-### v1.3.1 (Current Release - 2025-12-17)
+### v1.3.2 (Current Release - 2025-12-17)
+
+**Cleanup Release** - Removed unused services:
+- Removed Grafana (replaced by custom admin UI)
+- Removed InfluxDB (migrated to TimescaleDB)
+- Freed ~6GB disk space on production server
+
+### v1.3.1 (2025-12-17)
 
 **Stability Update** - API rate limiting fix:
 - Added configurable Device Query Delay setting in UI

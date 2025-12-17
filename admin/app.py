@@ -745,25 +745,6 @@ async def get_groups():
     return JSONResponse(content={"groups": groups})
 
 
-@app.get("/api/groups/grafana")
-async def get_groups_for_grafana():
-    """API endpoint formatted for Grafana variable queries"""
-    groups = load_groups()
-    
-    grafana_format = []
-    grafana_format.append({"text": "All Devices", "value": ".*"})
-    
-    for group_name, group_data in groups.items():
-        device_regex = "|".join([f"^{re.escape(device)}$" for device in group_data.get("devices", [])])
-        if device_regex:
-            grafana_format.append({
-                "text": group_data.get("name", group_name),
-                "value": device_regex
-            })
-    
-    return JSONResponse(content=grafana_format)
-
-
 @app.post("/api/groups")
 async def create_group(
     name: str = Form(...),
