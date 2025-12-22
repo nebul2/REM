@@ -135,7 +135,12 @@ async function loadAnnotations() {
 // Setup event listeners
 function setupEventListeners() {
     // Chart A experiment selection
-    document.getElementById('chartAExperiment').addEventListener('change', (e) => {
+    const chartAExperimentEl = document.getElementById('chartAExperiment');
+    if (!chartAExperimentEl) {
+        console.error('chartAExperiment element not found');
+        return;
+    }
+    chartAExperimentEl.addEventListener('change', (e) => {
         currentExperimentA = e.target.value;
         if (currentExperimentA) {
             populateGroupsForChart('A', currentExperimentA);
@@ -170,7 +175,12 @@ function setupEventListeners() {
     // Checkboxes have individual change handlers that call updateSelectedGroups()
     
     // Chart B experiment selection
-    document.getElementById('chartBExperiment').addEventListener('change', (e) => {
+    const chartBExperimentEl = document.getElementById('chartBExperiment');
+    if (!chartBExperimentEl) {
+        console.error('chartBExperiment element not found');
+        return;
+    }
+    chartBExperimentEl.addEventListener('change', (e) => {
         currentExperimentB = e.target.value;
         if (currentExperimentB) {
             populateGroupsForChart('B', currentExperimentB);
@@ -204,7 +214,12 @@ function setupEventListeners() {
     // Chart B group checkboxes are handled by updateSelectedGroups() in populateGroupsForChart
     // Checkboxes have individual change handlers that call updateSelectedGroups()
     
-    document.getElementById('timeRange').addEventListener('change', (e) => {
+    const timeRangeEl = document.getElementById('timeRange');
+    if (!timeRangeEl) {
+        console.error('timeRange element not found');
+        return;
+    }
+    timeRangeEl.addEventListener('change', (e) => {
         const newTimeRange = e.target.value;
         currentTimeRange = newTimeRange;
         console.log(`Time range changed to: ${currentTimeRange}`);
@@ -233,12 +248,20 @@ function setupEventListeners() {
         }
     });
     
-    document.getElementById('applyCustomRange').addEventListener('click', () => {
+    const applyCustomRangeEl = document.getElementById('applyCustomRange');
+    if (applyCustomRangeEl) {
+        applyCustomRangeEl.addEventListener('click', () => {
         if (currentExperimentA && currentGroupsA.length > 0) loadChartData('A');
         if (currentExperimentB && currentGroupsB.length > 0) loadChartData('B');
-    });
+        });
+    }
     
-    document.getElementById('aggregation').addEventListener('change', (e) => {
+    const aggregationEl = document.getElementById('aggregation');
+    if (!aggregationEl) {
+        console.error('aggregation element not found');
+        return;
+    }
+    aggregationEl.addEventListener('change', (e) => {
         currentAggregation = e.target.value;
         console.log(`Aggregation changed to: ${currentAggregation}`);
         // Always reload charts when aggregation changes (if data exists)
@@ -260,19 +283,27 @@ function setupEventListeners() {
         }
     });
     
-    document.getElementById('curveType').addEventListener('change', (e) => {
-        curveType = e.target.value;
-        updateCharts();
-    });
+    const curveTypeEl = document.getElementById('curveType');
+    if (curveTypeEl) {
+        curveTypeEl.addEventListener('change', (e) => {
+            curveType = e.target.value;
+            updateCharts();
+        });
+    }
     
     // Statistical toggles
-    document.getElementById('showDevices').addEventListener('change', (e) => {
-        showDevices = e.target.checked;
-        updateCharts();
-    });
+    const showDevicesEl = document.getElementById('showDevices');
+    if (showDevicesEl) {
+        showDevicesEl.addEventListener('change', (e) => {
+            showDevices = e.target.checked;
+            updateCharts();
+        });
+    }
     
-    document.getElementById('showMean').addEventListener('change', (e) => {
-        showMean = e.target.checked;
+    const showMeanEl = document.getElementById('showMean');
+    if (showMeanEl) {
+        showMeanEl.addEventListener('change', (e) => {
+            showMean = e.target.checked;
         console.log('Toggle Mean:', showMean);
         try {
             if (typeof updateCharts === 'function') {
@@ -283,10 +314,13 @@ function setupEventListeners() {
         } catch (error) {
             console.error('Error in showMean toggle:', error);
         }
-    });
+        });
+    }
     
-    document.getElementById('showMedian').addEventListener('change', (e) => {
-        showMedian = e.target.checked;
+    const showMedianEl = document.getElementById('showMedian');
+    if (showMedianEl) {
+        showMedianEl.addEventListener('change', (e) => {
+            showMedian = e.target.checked;
         console.log('Toggle Median:', showMedian);
         try {
             if (typeof updateCharts === 'function') {
@@ -297,10 +331,13 @@ function setupEventListeners() {
         } catch (error) {
             console.error('Error in showMedian toggle:', error);
         }
-    });
+        });
+    }
     
-    document.getElementById('showTotal').addEventListener('change', (e) => {
-        showTotal = e.target.checked;
+    const showTotalEl = document.getElementById('showTotal');
+    if (showTotalEl) {
+        showTotalEl.addEventListener('change', (e) => {
+            showTotal = e.target.checked;
         console.log('Toggle Total:', showTotal);
         try {
             if (typeof updateCharts === 'function') {
@@ -311,10 +348,13 @@ function setupEventListeners() {
         } catch (error) {
             console.error('Error in showTotal toggle:', error);
         }
-    });
+        });
+    }
     
-    document.getElementById('showAverage').addEventListener('change', (e) => {
-        showAverage = e.target.checked;
+    const showAverageEl = document.getElementById('showAverage');
+    if (showAverageEl) {
+        showAverageEl.addEventListener('change', (e) => {
+            showAverage = e.target.checked;
         console.log('Toggle Average:', showAverage);
         try {
             if (typeof updateCharts === 'function') {
@@ -325,12 +365,16 @@ function setupEventListeners() {
         } catch (error) {
             console.error('Error in showAverage toggle:', error);
         }
-    });
+        });
+    }
     
-    document.getElementById('splitCharts').addEventListener('change', (e) => {
-        splitCharts = e.target.checked;
-        toggleOverlay();
-    });
+    const splitChartsEl = document.getElementById('splitCharts');
+    if (splitChartsEl) {
+        splitChartsEl.addEventListener('change', (e) => {
+            splitCharts = e.target.checked;
+            toggleOverlay();
+        });
+    }
     
     // Auto-update toggle button
     const autoUpdateBtn = document.getElementById('autoUpdateBtn');
@@ -357,105 +401,126 @@ function setupEventListeners() {
     }
     
     // Buttons
-    document.getElementById('addAnnotationBtn').addEventListener('click', () => {
-        openModal('addAnnotationModal');
-    });
+    const addAnnotationBtn = document.getElementById('addAnnotationBtn');
+    if (addAnnotationBtn) {
+        addAnnotationBtn.addEventListener('click', () => {
+            openModal('addAnnotationModal');
+        });
+    }
     
-    document.getElementById('saveSnapshotBtn').addEventListener('click', () => {
-        populateExperimentSelects(); // Ensure snapshot experiment select is populated
-        openModal('saveSnapshotModal');
-    });
+    const saveSnapshotBtn = document.getElementById('saveSnapshotBtn');
+    if (saveSnapshotBtn) {
+        saveSnapshotBtn.addEventListener('click', () => {
+            populateExperimentSelects(); // Ensure snapshot experiment select is populated
+            openModal('saveSnapshotModal');
+        });
+    }
     
     // Start/End Experiment handlers
-    document.getElementById('startExperimentBtn').addEventListener('click', async () => {
-        // Get currently selected experiment (Chart A takes priority)
-        const experimentId = currentExperimentA || currentExperimentB;
-        if (!experimentId) {
-            alert('Please select an experiment first');
-            return;
-        }
-        
-        try {
-            const response = await fetch(`/api/experiments/${experimentId}/start`, {
-                method: 'POST'
-            });
-            
-            if (response.ok) {
-                const result = await response.json();
-                experiments[experimentId] = result.experiment;
-                populateExperimentSelects();
-                alert(`Experiment "${result.experiment.name}" started!`);
-            } else {
-                const error = await response.json();
-                alert(`Error: ${error.detail || 'Failed to start experiment'}`);
+    const startExperimentBtn = document.getElementById('startExperimentBtn');
+    if (startExperimentBtn) {
+        startExperimentBtn.addEventListener('click', async () => {
+            // Get currently selected experiment (Chart A takes priority)
+            const experimentId = currentExperimentA || currentExperimentB;
+            if (!experimentId) {
+                alert('Please select an experiment first');
+                return;
             }
-        } catch (error) {
-            alert(`Error: ${error.message}`);
-        }
-    });
+            
+            try {
+                const response = await fetch(`/api/experiments/${experimentId}/start`, {
+                    method: 'POST'
+                });
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    experiments[experimentId] = result.experiment;
+                    populateExperimentSelects();
+                    alert(`Experiment "${result.experiment.name}" started!`);
+                } else {
+                    const error = await response.json();
+                    alert(`Error: ${error.detail || 'Failed to start experiment'}`);
+                }
+            } catch (error) {
+                alert(`Error: ${error.message}`);
+            }
+        });
+    }
     
-    document.getElementById('endExperimentBtn').addEventListener('click', async () => {
-        // Get currently selected experiment (Chart A takes priority)
-        const experimentId = currentExperimentA || currentExperimentB;
-        if (!experimentId) {
-            alert('Please select an experiment first');
-            return;
-        }
-        
-        const experiment = experiments[experimentId];
-        if (!experiment || !experiment.is_current) {
-            alert('This experiment is not currently running');
-            return;
-        }
-        
-        if (!confirm(`End experiment "${experiment.name}"? This will set the end time to now.`)) {
-            return;
-        }
-        
-        try {
-            const response = await fetch(`/api/experiments/${experimentId}/end`, {
-                method: 'POST'
-            });
-            
-            if (response.ok) {
-                const result = await response.json();
-                experiments[experimentId] = result.experiment;
-                populateExperimentSelects();
-                alert(`Experiment "${result.experiment.name}" ended!`);
-                // Reload charts to reflect new time range
-                if (currentExperimentA && currentGroupsA.length > 0) loadChartData('A');
-                if (currentExperimentB && currentGroupsB.length > 0) loadChartData('B');
-            } else {
-                const error = await response.json();
-                alert(`Error: ${error.detail || 'Failed to end experiment'}`);
+    const endExperimentBtn = document.getElementById('endExperimentBtn');
+    if (endExperimentBtn) {
+        endExperimentBtn.addEventListener('click', async () => {
+            // Get currently selected experiment (Chart A takes priority)
+            const experimentId = currentExperimentA || currentExperimentB;
+            if (!experimentId) {
+                alert('Please select an experiment first');
+                return;
             }
-        } catch (error) {
-            alert(`Error: ${error.message}`);
-        }
-    });
+            
+            const experiment = experiments[experimentId];
+            if (!experiment || !experiment.is_current) {
+                alert('This experiment is not currently running');
+                return;
+            }
+            
+            if (!confirm(`End experiment "${experiment.name}"? This will set the end time to now.`)) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api/experiments/${experimentId}/end`, {
+                    method: 'POST'
+                });
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    experiments[experimentId] = result.experiment;
+                    populateExperimentSelects();
+                    alert(`Experiment "${result.experiment.name}" ended!`);
+                    // Reload charts to reflect new time range
+                    if (currentExperimentA && currentGroupsA.length > 0) loadChartData('A');
+                    if (currentExperimentB && currentGroupsB.length > 0) loadChartData('B');
+                } else {
+                    const error = await response.json();
+                    alert(`Error: ${error.detail || 'Failed to end experiment'}`);
+                }
+            } catch (error) {
+                alert(`Error: ${error.message}`);
+            }
+        });
+    }
     
     // Collector Control
-    document.getElementById('collectorEnabled').addEventListener('change', async (e) => {
-        await updateCollectorEnabled(e.target.checked);
-    });
+    const collectorEnabledEl = document.getElementById('collectorEnabled');
+    if (collectorEnabledEl) {
+        collectorEnabledEl.addEventListener('change', async (e) => {
+            await updateCollectorEnabled(e.target.checked);
+        });
+    }
     
-    document.getElementById('updatePollInterval').addEventListener('click', async () => {
-        const interval = parseInt(document.getElementById('pollInterval').value);
-        if (interval >= 5 && interval <= 300) {
-            await updatePollInterval(interval);
-        } else {
-            alert('Poll interval must be between 5 and 300 seconds');
-        }
-    });
+    const updatePollIntervalBtn = document.getElementById('updatePollInterval');
+    if (updatePollIntervalBtn) {
+        updatePollIntervalBtn.addEventListener('click', async () => {
+            const interval = parseInt(document.getElementById('pollInterval').value);
+            if (interval >= 5 && interval <= 300) {
+                await updatePollInterval(interval);
+            } else {
+                alert('Poll interval must be between 5 and 300 seconds');
+            }
+        });
+    }
     
-    document.getElementById('updateDeviceQueryDelay').addEventListener('click', async () => {
-        const delay = parseFloat(document.getElementById('deviceQueryDelay').value);
-        if (delay >= 0 && delay <= 5) {
-            await updateDeviceQueryDelay(delay);
-        } else {
-            alert('Device query delay must be between 0 and 5 seconds');
-        }
-    });
+    const updateDeviceQueryDelayBtn = document.getElementById('updateDeviceQueryDelay');
+    if (updateDeviceQueryDelayBtn) {
+        updateDeviceQueryDelayBtn.addEventListener('click', async () => {
+            const delay = parseFloat(document.getElementById('deviceQueryDelay').value);
+            if (delay >= 0 && delay <= 5) {
+                await updateDeviceQueryDelay(delay);
+            } else {
+                alert('Device query delay must be between 0 and 5 seconds');
+            }
+        });
+    }
     
     // Load collector status on page load
     loadCollectorStatus();
@@ -463,10 +528,13 @@ function setupEventListeners() {
     // Refresh collector status every 10 seconds
     setInterval(loadCollectorStatus, 10000);
     
-    document.getElementById('refreshBtn').addEventListener('click', () => {
-        if (currentExperimentA && currentGroupsA.length > 0) loadChartData('A');
-        if (currentExperimentB && currentGroupsB.length > 0) loadChartData('B');
-    });
+    const refreshBtn = document.getElementById('refreshBtn');
+    if (refreshBtn) {
+        refreshBtn.addEventListener('click', () => {
+            if (currentExperimentA && currentGroupsA.length > 0) loadChartData('A');
+            if (currentExperimentB && currentGroupsB.length > 0) loadChartData('B');
+        });
+    }
 }
 
 // Populate experiment selects for Chart A, Chart B, and Snapshot
@@ -1093,12 +1161,21 @@ async function loadDefaultChart() {
     }
     
     // Only set to 1h if this is the initial load (time range not manually selected)
+    // Don't override if user has already selected a time range
     const timeRangeSelect = document.getElementById('timeRange');
-    if (timeRangeSelect && (!timeRangeSelect.value || timeRangeSelect.value === '1h')) {
-        currentTimeRange = '1h';
-        if (timeRangeSelect) {
+    if (timeRangeSelect) {
+        const selectedValue = timeRangeSelect.value;
+        // Only reset to 1h if dropdown is empty or explicitly set to 1h
+        if (!selectedValue || selectedValue === '1h') {
+            currentTimeRange = '1h';
             timeRangeSelect.value = '1h';
+        } else {
+            // User has selected a different time range - preserve it
+            currentTimeRange = selectedValue;
         }
+    } else {
+        // No dropdown found, default to 1h
+        currentTimeRange = '1h';
     }
     
     const selectedTimeRange = timeRangeSelect ? timeRangeSelect.value : currentTimeRange;

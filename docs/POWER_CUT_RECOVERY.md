@@ -17,7 +17,6 @@ All services have health checks configured:
 - **TimescaleDB**: Checks database readiness every 10s
 - **Collector**: Verifies Python process is running every 30s
 - **Admin**: Tests HTTP endpoint every 30s
-- **Grafana**: Tests HTTP health endpoint every 10s
 
 Health checks allow Docker to detect and restart unhealthy containers.
 
@@ -202,6 +201,7 @@ If automatic recovery fails:
 
 **Last Updated**: 2025-12-08  
 **Version**: 1.1.0
+
 
 
 
