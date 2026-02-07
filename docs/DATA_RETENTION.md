@@ -95,9 +95,10 @@ FROM gos_rem;
 
 ## Current Configuration
 
-The retention policy is currently **commented out** in `scripts/init-timescaledb.sql`. To enable it, uncomment and modify the line:
-```sql
--- Set retention policy (optional - delete data older than 90 days)
-SELECT add_retention_policy('gos_rem', INTERVAL '90 days');
-```
+- **New installs**: 90-day retention is enabled in `scripts/init-timescaledb.sql`.
+- **Existing installs (e.g. Pi400)**: Run from the stats project root:
+  ```bash
+  ./scripts/retention-and-cleanup.sh
+  ```
+  This reports DB size, adds the 90-day policy if missing, and optionally deletes old data and runs `VACUUM FULL` to reclaim space. See also `tools/pi400/PI400_DISK_TIDY.md` for full Pi400 disk tidy steps.
 

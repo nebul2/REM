@@ -25,6 +25,6 @@ CREATE INDEX IF NOT EXISTS idx_gos_rem_alias ON gos_rem (alias);
 -- Create composite index for common queries (time + alias)
 CREATE INDEX IF NOT EXISTS idx_gos_rem_time_alias ON gos_rem (time DESC, alias);
 
--- Set retention policy (optional - delete data older than 90 days)
--- This can be configured later via TimescaleDB retention policies
+-- 90-day retention: drop old data automatically to avoid filling disk (e.g. on Pi400)
+SELECT add_retention_policy('gos_rem', INTERVAL '90 days');
 
