@@ -60,6 +60,40 @@ If you don't have a refresh token:
 
 3. **Save refresh token** to `.env` as `TPLINK_REFRESH_TOKEN`
 
+### Redo TP-Link auth (stats loads but no devices list)
+
+If the admin UI loads but devices don’t appear, the refresh token is missing or expired. Get a new one and point the collector at it:
+
+1. **From your Mac**, run the helper script (no browser automation; it prints the authorize URL):
+   ```bash
+   cd /path/to/cursor-devbench/gos/stats
+   chmod +x scripts/tplink-auth-refresh.sh
+   ./scripts/tplink-auth-refresh.sh
+   ```
+2. Open the URL it prints in your browser → sign in to TP-Link/Kasa → after redirect, copy the `code` from the URL.
+3. Paste the code when the script prompts. It will exchange the code for tokens and print the **refresh token**.
+4. **On pi400**: set the new token and **recreate** the collector (restart does not reload `.env`):
+   ```bash
+   ssh pi400
+   nano /home/d2/stats/.env   # set TPLINK_REFRESH_TOKEN=<the new token>
+   cd /home/d2/stats && sudo docker compose up -d collector
+   ```
+   Use `up -d`, not `restart`, so the container gets the updated environment.
+5. Reload the stats admin UI. Devices appear only after the collector has written at least one poll to the DB (wait one poll interval, e.g. 30s).
+
+**If still no devices:**  
+- You must **recreate** the collector after editing `.env`: `docker compose up -d collector` (not `restart`).  
+- Check logs: `sudo docker compose logs -f collector`. You should see e.g. `TP-Link devices: N from API, M used`. If N is 0, the token is wrong or the account has no devices; if N > 0 but M is 0, all devices were skipped (offline or unsupported model – only P110, P110M, P115, HS110, KP115, EP10 are collected).  
+- If logs show `relation "gos_rem" does not exist`, the TimescaleDB table was never created (e.g. init script failed). Create it manually or run the SQL in `scripts/init-timescaledb.sql` against the `gos_rem` database, then restart the collector.  
+- Ensure plugs are online in the Kasa app and are one of the supported models above.
+
+Alternatively you can do steps 1–2 manually (authorize URL + copy code), then run the collector once interactively so it can save the token into its volume:
+   ```bash
+   ssh pi400 'cd /home/d2/stats && sudo docker compose run --rm -it collector'
+   # When it asks "Paste Code:", paste the code from the redirect URL, then Ctrl+C
+   sudo docker compose up -d collector
+   ```
+
 ---
 
 ## Staging Deployment (Pi400)

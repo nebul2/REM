@@ -35,15 +35,22 @@ def getToken():
             except:
                 pass
 
-    if len(refreshToken) >= 2: #if refreshToken then use to get accessToken
-        authurl='https://aps1-openapi.tplinknbu.com/v1/oauth/token'
+    if len(refreshToken) >= 2:  # use refresh token to get access token
+        authurl = 'https://aps1-openapi.tplinknbu.com/v1/oauth/token'
         getTokendata = {'client_id': 'fdcae128-0adf-4233-8a58-30760652bd16', 'grant_type': 'refresh_token', 'client_secret': '4087d4b9-5e0c-4e50-b06c-22580fc618d5', 'refresh_token': refreshToken}
-        tokenResponse = requests.post(authurl, data=getTokendata)
-        tokensjson = tokenResponse.json()
-        accessToken=tokensjson["accessToken"]
-        refreshToken=tokensjson["refreshToken"]
+        try:
+            tokenResponse = requests.post(authurl, data=getTokendata, timeout=15)
+            tokensjson = tokenResponse.json()
+        except Exception as e:
+            logger.error(f"Token refresh request failed: {e}")
+            raise
+        if tokensjson.get('errorCode') or tokensjson.get('error'):
+            logger.error(f"Token refresh API error: {tokensjson}")
+            raise RuntimeError(f"TP-Link token refresh failed: {tokensjson}")
+        accessToken = tokensjson["accessToken"]
+        refreshToken = tokensjson["refreshToken"]
 
-    else:    #if no refreshToken then ask user for manual code
+    else:  # no refresh token: ask user for authorization code
         inputcode=input("Paste Code:")
         authurl='https://aps1-openapi.tplinknbu.com/v1/oauth/token'
         getTokendata = {'client_id': 'fdcae128-0adf-4233-8a58-30760652bd16', 'grant_type': 'code', 'client_secret': '4087d4b9-5e0c-4e50-b06c-22580fc618d5', 'code': inputcode}
@@ -66,20 +73,45 @@ def getToken():
 
     return accessToken
 
+# TP-Link models that support real-time energy (getDeviceRealTimeEnergy). Add others as needed.
+SUPPORTED_ENERGY_MODELS = ('P110', 'P110M', 'P115', 'HS110', 'KP115', 'EP10')
+
 def getDeviceIdList(accessToken):
+    devListurl = 'https://aps1-openapi.tplinknbu.com/v1/getDeviceList?'
+    getDevlistdata = {'client_id': 'fdcae128-0adf-4233-8a58-30760652bd16', 'api_key': 'e71bf02f-8b71-42ee-8af0-62a7bdf6c866', 'token': accessToken}
+    try:
+        devList = requests.post(devListurl, data=getDevlistdata, timeout=15)
+        resp = devList.json()
+    except Exception as e:
+        logger.error(f"TP-Link getDeviceList request failed: {e}")
+        return []
 
-    devListurl='https://aps1-openapi.tplinknbu.com/v1/getDeviceList?'
-    getDevlistdata={'client_id': 'fdcae128-0adf-4233-8a58-30760652bd16', 'api_key': 'e71bf02f-8b71-42ee-8af0-62a7bdf6c866', 'token': accessToken}
-    devList = requests.post(devListurl, data=getDevlistdata)
-    print(devList.json())
+    if resp.get('errorCode') or resp.get('error'):
+        logger.error(f"TP-Link getDeviceList API error: {resp}")
+        return []
 
-    deviceIdList =[]
-    for item in devList.json()["devices"]:
-        if item['online'] != False and item['model'] in('P110' ,'P110M'):
-            deviceIdList.append({'deviceId': item['deviceId'],
-                                    'alias': item['alias']})
-    
-    print(deviceIdList)
+    devices = resp.get("devices")
+    if devices is None:
+        logger.warning("TP-Link getDeviceList response has no 'devices' key: %s", resp)
+        return []
+
+    deviceIdList = []
+    skipped_offline = 0
+    skipped_model = 0
+    for item in devices:
+        if item.get('online') is False:
+            skipped_offline += 1
+            continue
+        model = item.get('model') or ''
+        if model not in SUPPORTED_ENERGY_MODELS:
+            skipped_model += 1
+            continue
+        deviceIdList.append({'deviceId': item['deviceId'], 'alias': item.get('alias') or item['deviceId']})
+
+    logger.info("TP-Link devices: %d from API, %d used (skipped %d offline, %d unsupported model)",
+                len(devices), len(deviceIdList), skipped_offline, skipped_model)
+    if deviceIdList:
+        logger.info("Collecting from: %s", [d['alias'] for d in deviceIdList])
     return deviceIdList
 
 
@@ -219,15 +251,32 @@ def pollCloud(config, db_conn, accessToken):
 
 
 def do_work(config, db_conn, accessToken):
-    #lets go get a list of the devices and their power
-    pollCloud(config, db_conn, accessToken)
-    return
+    """Execute one collection cycle. Returns True on success, False on failure."""
+    try:
+        #lets go get a list of the devices and their power
+        pollCloud(config, db_conn, accessToken)
+        return True
+    except psycopg2.OperationalError as e:
+        logger.error(f"Database connection error: {e}")
+        return False
+    except Exception as e:
+        logger.error(f"Unexpected error in do_work: {e}", exc_info=True)
+        return False
 
 
 def sendToTimescaleDB(db_conn, points_buffer):
     ''' Take a set of values, and send them to TimescaleDB
     '''
     try:
+        # Check if connection is still alive
+        try:
+            cursor = db_conn.cursor()
+            cursor.execute("SELECT 1")
+            cursor.close()
+        except (psycopg2.OperationalError, psycopg2.InterfaceError):
+            logger.error("Database connection is dead, cannot write data")
+            return False
+        
         cursor = db_conn.cursor()
         
         # Prepare data for batch insert
@@ -247,14 +296,24 @@ def sendToTimescaleDB(db_conn, points_buffer):
         db_conn.commit()
         cursor.close()
         return True
+    except (psycopg2.OperationalError, psycopg2.InterfaceError) as e:
+        logger.error(f"Database connection error writing to TimescaleDB: {e}")
+        try:
+            db_conn.rollback()
+        except:
+            pass
+        return False
     except Exception as e:
-        print(f"Failed to write to TimescaleDB: {e}")
-        db_conn.rollback()
+        logger.error(f"Failed to write to TimescaleDB: {e}", exc_info=True)
+        try:
+            db_conn.rollback()
+        except:
+            pass
         return False
 
 
 def get_db_connection(config):
-    ''' Create PostgreSQL/TimescaleDB connection
+    ''' Create PostgreSQL/TimescaleDB connection with retry logic
     '''
     # Read connection parameters from environment variables or config
     host = os.getenv("POSTGRES_HOST", config.get("postgresql", {}).get("host", "timescaledb"))
@@ -263,18 +322,36 @@ def get_db_connection(config):
     user = os.getenv("POSTGRES_USER", config.get("postgresql", {}).get("user", "gos"))
     password = os.getenv("POSTGRES_PASSWORD", config.get("postgresql", {}).get("password", ""))
     
-    try:
-        conn = psycopg2.connect(
-            host=host,
-            port=port,
-            database=database,
-            user=user,
-            password=password
-        )
-        return conn
-    except Exception as e:
-        print(f"Failed to connect to TimescaleDB: {e}")
-        return None
+    max_retries = 3
+    retry_delay = 5
+    
+    for attempt in range(max_retries):
+        try:
+            conn = psycopg2.connect(
+                host=host,
+                port=port,
+                database=database,
+                user=user,
+                password=password,
+                connect_timeout=10
+            )
+            # Test the connection
+            test_cursor = conn.cursor()
+            test_cursor.execute("SELECT 1")
+            test_cursor.close()
+            logger.info(f"Successfully connected to TimescaleDB (attempt {attempt + 1})")
+            return conn
+        except psycopg2.OperationalError as e:
+            logger.warning(f"Database connection attempt {attempt + 1}/{max_retries} failed: {e}")
+            if attempt < max_retries - 1:
+                time.sleep(retry_delay)
+            else:
+                logger.error(f"Failed to connect to TimescaleDB after {max_retries} attempts")
+        except Exception as e:
+            logger.error(f"Unexpected error connecting to database: {e}")
+            return None
+    
+    return None
 
 
 def main():
@@ -305,14 +382,66 @@ def main():
         return
 
     # Otherwise, set up a loop and poll periodically
+    consecutive_failures = 0
+    max_consecutive_failures = 10  # Exit after 10 consecutive failures
+    
     try:
         while True:
-            do_work(config, db_conn, accessToken)
-            time.sleep(int(config["poller"]["interval"]))
-    except KeyboardInterrupt:
-        print("\nShutting down...")
+            try:
+                # Check if database connection is still alive, reconnect if needed
+                try:
+                    test_cursor = db_conn.cursor()
+                    test_cursor.execute("SELECT 1")
+                    test_cursor.close()
+                except (psycopg2.OperationalError, psycopg2.InterfaceError, AttributeError) as e:
+                    logger.warning(f"Database connection lost ({type(e).__name__}), attempting to reconnect...")
+                    try:
+                        db_conn.close()
+                    except:
+                        pass
+                    db_conn = get_db_connection(config)
+                    if not db_conn:
+                        logger.error("Failed to reconnect to database")
+                        consecutive_failures += 1
+                        if consecutive_failures >= max_consecutive_failures:
+                            logger.error(f"Too many consecutive failures ({consecutive_failures}), exiting")
+                            sys.exit(1)
+                        time.sleep(int(config["poller"]["interval"]))
+                        continue
+                    logger.info("Successfully reconnected to database")
+                
+                # Execute collection cycle
+                success = do_work(config, db_conn, accessToken)
+                
+                if success:
+                    consecutive_failures = 0  # Reset failure counter on success
+                else:
+                    consecutive_failures += 1
+                    logger.warning(f"Collection cycle failed ({consecutive_failures}/{max_consecutive_failures})")
+                    if consecutive_failures >= max_consecutive_failures:
+                        logger.error(f"Too many consecutive failures ({consecutive_failures}), exiting")
+                        sys.exit(1)
+                
+                time.sleep(int(config["poller"]["interval"]))
+                
+            except KeyboardInterrupt:
+                logger.info("Received keyboard interrupt, shutting down...")
+                break
+            except Exception as e:
+                consecutive_failures += 1
+                logger.error(f"Unexpected error in main loop: {e}", exc_info=True)
+                if consecutive_failures >= max_consecutive_failures:
+                    logger.error(f"Too many consecutive failures ({consecutive_failures}), exiting")
+                    sys.exit(1)
+                # Wait before retrying after an error
+                time.sleep(int(config["poller"]["interval"]))
+                
     finally:
-        db_conn.close()
+        logger.info("Closing database connection...")
+        try:
+            db_conn.close()
+        except:
+            pass
 
 
 if __name__ == "__main__":

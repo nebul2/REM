@@ -26,5 +26,11 @@ CREATE INDEX IF NOT EXISTS idx_gos_rem_alias ON gos_rem (alias);
 CREATE INDEX IF NOT EXISTS idx_gos_rem_time_alias ON gos_rem (time DESC, alias);
 
 -- 90-day retention: drop old data automatically to avoid filling disk (e.g. on Pi400)
-SELECT add_retention_policy('gos_rem', INTERVAL '90 days');
+-- Wrapped in DO block so table creation is not rolled back if this fails (e.g. TimescaleDB version)
+DO $$
+BEGIN
+  PERFORM add_retention_policy('gos_rem', INTERVAL '90 days');
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'Retention policy not added (optional): %', SQLERRM;
+END $$;
 
