@@ -1,5 +1,10 @@
 # Pi400 Deployment Summary
 
+> **Note (v1.4.0)**  
+> The Pi400 deployment is now used as **development/staging**.  
+> The primary production deployment runs on **Akamai Linode** at `https://rem.greeningofstreaming.org`.  
+> This document describes the historical Pi400 migration from InfluxDB to TimescaleDB.
+
 ## ✅ Completed
 
 1. **TimescaleDB Migration**

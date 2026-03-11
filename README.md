@@ -113,7 +113,7 @@ The Greening of Streaming (GOS) organization uses this system to:
 ## Project Status
 
 ### Current State
-- ✅ **Fully Containerized**: Docker Compose stack running on Pi400
+- ✅ **Fully Containerized**: Docker Compose stack for collector, TimescaleDB, and admin UI
 - ✅ **TimescaleDB**: PostgreSQL-based time-series database
 - ✅ **Data Collector**: Polling TP-Link API every 30 seconds
 - ✅ **GOS REM Data Exploration Tool**: Interactive web UI for data analysis
@@ -121,6 +121,8 @@ The Greening of Streaming (GOS) organization uses this system to:
 - ✅ **Experiment Management**: Device grouping and A/B testing support
 - ✅ **Snapshot Gallery**: Save and archive chart snapshots with annotations
 - ✅ **Database Export/Import**: Full backup and migration capabilities
+- ✅ **Production Deployment**: Primary instance running on Akamai Linode (`rem.greeningofstreaming.org`)
+- ✅ **Pi400 Dev/Staging**: Original Pi400 stack retained as development and backup environment
 
 ### Key Features
 - 📊 **Interactive Charts**: Overlay multiple experiments, toggle device visibility, statistical overlays
@@ -218,6 +220,10 @@ POSTGRES_PASSWORD=your-secure-password
 # Collector
 POLL_INTERVAL=30  # seconds (configurable via UI)
 LOG_LEVEL=INFO
+
+# Admin UI Basic Auth (optional, recommended for production)
+ADMIN_BASIC_USER=your-admin-username
+ADMIN_BASIC_PASSWORD=your-strong-password
 ```
 
 ### Polling Frequency
@@ -279,13 +285,14 @@ ORDER BY time;
 ```
 
 ### Akamai Linode (Production)
+- **Role**: Primary production deployment
 - **Instance**: Nanode 1GB ($5/month)
 - **Region**: Closest to team
-- **Access**: HTTPS with Let's Encrypt SSL
-- **Backup**: Daily automated backups
+- **Access**: `https://rem.greeningofstreaming.org` (Caddy + Let's Encrypt)
+- **Auth**: HTTP Basic Auth via admin middleware (`ADMIN_BASIC_USER` / `ADMIN_BASIC_PASSWORD`)
 
-### Production Deployment (Pi400)
-- **Status**: ✅ Currently running on Raspberry Pi 400
+### Pi400 Deployment (Dev / Staging)
+- **Status**: ✅ Raspberry Pi 400, used for development and staging
 - **URL**: https://stats.liveencode.com
 - **Access**: Protected by Authelia authentication
 - **Services**: All services running in Docker containers
@@ -490,7 +497,9 @@ This project is part of the Greening of Streaming organization's research initia
 
 ### Network Security
 - TimescaleDB not exposed publicly
-- Admin UI behind authentication (via Traefik/Authelia)
+- Admin UI behind authentication:
+  - **Production (Linode)**: Built-in HTTP Basic Auth + Caddy HTTPS
+  - **Dev (Pi400)**: Traefik/Authelia in front of the admin UI
 - HTTPS for public interfaces
 
 ---
@@ -526,16 +535,27 @@ TBD - To be determined with GOS team
 
 ---
 
-**Last Updated**: 2025-12-12  
-**Version**: 1.2.0  
-**Status**: ✅ Operational and Deployed on Pi400 (staging)  
+**Last Updated**: 2026-03-11  
+**Version**: 1.4.0  
+**Status**: ✅ Operational – Production on Linode, Pi400 as dev/staging  
 **Documentation**: All development notes and guides are in the [`docs/`](docs/) folder
 
 ---
 
 ## Release Notes
 
-### v1.3.2 (Current Release - 2025-12-17)
+### v1.4.0 (Initial Linode Production Release - 2026-03-11)
+
+**What's New**
+- ✅ First production deployment on Akamai Linode (`rem.greeningofstreaming.org`)
+- ✅ Built‑in HTTP Basic Auth in the admin UI, controlled via `ADMIN_BASIC_USER` / `ADMIN_BASIC_PASSWORD`
+- ✅ Caddy reverse proxy on Linode for HTTPS termination (Let's Encrypt) and HTTP→HTTPS redirects
+- ✅ End‑to‑end data migration from Pi400 to Linode TimescaleDB (historic + live data)
+- ✅ Documented disaster‑recovery path from GitHub + DB backup
+
+---
+
+### v1.3.2 (2025-12-17)
 
 **Cleanup Release** - Removed unused services:
 - Removed Grafana (replaced by custom admin UI)

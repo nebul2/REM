@@ -1,3 +1,8 @@
+version: '3.8'
+
+# Stats Docker Compose Configuration with NAS Storage
+# All data volumes are stored on NAS to avoid SD card wear on Pi400/WRX
+
 services:
   timescaledb:
     image: timescale/timescaledb:latest-pg16
@@ -8,7 +13,8 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-in-production}
       PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
-      - timescaledb-data:/var/lib/postgresql/data
+      # Store database on NAS instead of local SD card
+      - ${NAS_DATA_PATH:-/home/pi/nas/gos_stats}/timescaledb:/var/lib/postgresql/data
       - ./scripts/init-timescaledb.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
@@ -46,7 +52,8 @@ services:
       - TOKEN_FILE=/app/data/refresh_token.txt
     volumes:
       - ./app/config:/app/config:ro
-      - collector-data:/app/data
+      # Store collector data on NAS
+      - ${NAS_DATA_PATH:-/home/pi/nas/gos_stats}/collector:/app/data
     depends_on:
       timescaledb:
         condition: service_healthy
@@ -73,11 +80,9 @@ services:
       - POSTGRES_USER=${POSTGRES_USER:-gos}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-change-me-in-production}
       - DATA_DIR=/app/data
-      # Optional HTTP Basic Auth for Admin UI
-      - ADMIN_BASIC_USER=${ADMIN_BASIC_USER}
-      - ADMIN_BASIC_PASSWORD=${ADMIN_BASIC_PASSWORD}
     volumes:
-      - admin-data:/app/data
+      # Store admin data on NAS (snapshots, experiments, groups, etc.)
+      - ${NAS_DATA_PATH:-/home/pi/nas/gos_stats}/admin:/app/data
     ports:
       - "${ADMIN_PORT:-7001}:7001"
     depends_on:
@@ -86,18 +91,6 @@ services:
     restart: always
     networks:
       - stats-network
-      # Uncomment the next line if using Traefik reverse proxy
-      # - traefik-network
-    # Uncomment the labels section below if using Traefik reverse proxy
-    # labels:
-    #   - "traefik.enable=true"
-    #   - "traefik.http.routers.stats.rule=Host(`stats.liveencode.com`)"
-    #   - "traefik.http.routers.stats.entrypoints=websecure"
-    #   - "traefik.http.routers.stats.tls.certresolver=letsencrypt"
-    #   - "traefik.http.services.stats.loadbalancer.server.port=7001"
-    #   - "traefik.http.routers.stats.middlewares=stats-auth"
-    #   - "traefik.http.middlewares.stats-auth.basicauth.usersfile=/etc/traefik/auth/users.txt"
-    #   - "traefik.docker.network=traefik-network"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:7001/api/devices').read()"]
       interval: 30s
@@ -105,17 +98,7 @@ services:
       retries: 5
       start_period: 30s
 
-volumes:
-  collector-data:
-    driver: local
-  timescaledb-data:
-    driver: local
-  admin-data:
-    driver: local
-
+# No named volumes - all data stored on NAS via bind mounts
 networks:
   stats-network:
     driver: bridge
-  # Uncomment the network below if using Traefik reverse proxy
-  # traefik-network:
-  #   external: true

@@ -22,6 +22,7 @@ import base64
 import zipfile
 from io import BytesIO, StringIO
 import csv
+import secrets
 
 app = FastAPI(title="GOS REM Data Exploration Tool", root_path="")
 
@@ -34,6 +35,58 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Optional HTTP Basic Auth for UI/APIs (enabled when both env vars are set)
+ADMIN_BASIC_USER = os.getenv("ADMIN_BASIC_USER", "").strip()
+ADMIN_BASIC_PASSWORD = os.getenv("ADMIN_BASIC_PASSWORD", "").strip()
+
+
+def _basic_auth_enabled() -> bool:
+    return bool(ADMIN_BASIC_USER and ADMIN_BASIC_PASSWORD)
+
+
+@app.middleware("http")
+async def basic_auth_middleware(request: Request, call_next):
+    # Only enforce auth if both username and password are configured
+    if not _basic_auth_enabled():
+        return await call_next(request)
+
+    path = request.url.path
+
+    # Paths that must remain unauthenticated
+    if path.startswith("/health") or path.startswith("/static") or path.startswith("/api/static"):
+        return await call_next(request)
+
+    auth = request.headers.get("authorization")
+    if not auth or not auth.lower().startswith("basic "):
+        return Response(
+            status_code=401,
+            headers={"WWW-Authenticate": "Basic"},
+            content="Unauthorized",
+        )
+
+    try:
+        encoded = auth.split(" ", 1)[1]
+        decoded = base64.b64decode(encoded).decode("utf-8")
+        username, password = decoded.split(":", 1)
+    except Exception:
+        return Response(
+            status_code=401,
+            headers={"WWW-Authenticate": "Basic"},
+            content="Unauthorized",
+        )
+
+    if not (
+        secrets.compare_digest(username, ADMIN_BASIC_USER)
+        and secrets.compare_digest(password, ADMIN_BASIC_PASSWORD)
+    ):
+        return Response(
+            status_code=401,
+            headers={"WWW-Authenticate": "Basic"},
+            content="Unauthorized",
+        )
+
+    return await call_next(request)
 
 # Templates and static files
 templates_dir = Path(__file__).parent / "templates"

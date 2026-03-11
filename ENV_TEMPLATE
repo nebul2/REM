@@ -17,3 +17,12 @@ LOG_LEVEL=INFO
 
 # Admin UI Settings
 ADMIN_PORT=7001
+
+# Admin UI Basic Auth (optional)
+# If both are set, HTTP Basic Auth will be required for the UI and APIs
+ADMIN_BASIC_USER=
+ADMIN_BASIC_PASSWORD=
+
+# NAS Storage Path (for WRX - all data stored on NAS instead of SD card)
+# Set this to your NAS mount point, e.g., /mnt/nas/stats or /media/nas/stats
+NAS_DATA_PATH=/home/pi/nas/gos_stats
