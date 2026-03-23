@@ -21,19 +21,28 @@ CONF_FILE = os.getenv("CONF_FILE", "/app/config/config.yaml")
 #visit this in browser first to get the 'code'
 # https://aps1-openapi.tplinknbu.com/v1/oauth/authorize?client_id=fdcae128-0adf-4233-8a58-30760652bd16&response_type=code&scope=all&state=123456789012345678901234&redirect_uri=https://www.greeningofstreaming.org
 
+TOKEN_INVALID_ERROR_CODE = -10902
+
+
+class TokenInvalidError(RuntimeError):
+    """Raised when TP-Link access token is invalid/expired."""
+    pass
+
+
 def getToken():
-    #load refreshToken from environment variable or file
-    refreshToken = os.getenv("TPLINK_REFRESH_TOKEN", "")
-    
-    # If not in env, try to read from file (for backward compatibility)
+    # Load refresh token, preferring the persisted token file.
+    # TP-Link rotates refresh tokens, so persisted token is usually newest.
+    refreshToken = ""
+    token_file = os.getenv("TOKEN_FILE", "/app/data/refresh_token.txt")
+    if os.path.exists(token_file):
+        try:
+            with open(token_file, "r") as f:
+                refreshToken = f.readline().strip()
+        except Exception as e:
+            logger.warning(f"Could not read refresh token from {token_file}: {e}")
+
     if not refreshToken:
-        token_file = os.getenv("TOKEN_FILE", "/app/data/refresh_token.txt")
-        if os.path.exists(token_file):
-            try:
-                with open(token_file, "r") as f:
-                    refreshToken = f.readline().strip()
-            except:
-                pass
+        refreshToken = os.getenv("TPLINK_REFRESH_TOKEN", "")
 
     if len(refreshToken) >= 2:  # use refresh token to get access token
         authurl = 'https://aps1-openapi.tplinknbu.com/v1/oauth/token'
@@ -59,11 +68,7 @@ def getToken():
         accessToken=tokensjson["accessToken"]
         refreshToken=tokensjson["refreshToken"]
 
-    print(accessToken)
-    print(refreshToken)
-
     # Save new refresh token to file for persistence
-    token_file = os.getenv("TOKEN_FILE", "/app/data/refresh_token.txt")
     try:
         os.makedirs(os.path.dirname(token_file), exist_ok=True)
         with open(token_file, "w") as f:
@@ -85,6 +90,9 @@ def getDeviceIdList(accessToken):
     except Exception as e:
         logger.error(f"TP-Link getDeviceList request failed: {e}")
         return []
+
+    if resp.get('errorCode') == TOKEN_INVALID_ERROR_CODE or str(resp.get("errMessage", "")).lower() == "token invalid":
+        raise TokenInvalidError(f"TP-Link token invalid: {resp}")
 
     if resp.get('errorCode') or resp.get('error'):
         logger.error(f"TP-Link getDeviceList API error: {resp}")
@@ -256,6 +264,9 @@ def do_work(config, db_conn, accessToken):
         #lets go get a list of the devices and their power
         pollCloud(config, db_conn, accessToken)
         return True
+    except TokenInvalidError:
+        # Allow caller to refresh token and retry
+        raise
     except psycopg2.OperationalError as e:
         logger.error(f"Database connection error: {e}")
         return False
@@ -377,7 +388,12 @@ def main():
 
     if not persist:
         # Trigger the poller as a one-shot thing
-        do_work(config, db_conn, accessToken)
+        try:
+            do_work(config, db_conn, accessToken)
+        except TokenInvalidError:
+            logger.warning("TP-Link token invalid in one-shot mode, refreshing token and retrying once")
+            accessToken = getToken()
+            do_work(config, db_conn, accessToken)
         db_conn.close()
         return
 
@@ -411,7 +427,16 @@ def main():
                     logger.info("Successfully reconnected to database")
                 
                 # Execute collection cycle
-                success = do_work(config, db_conn, accessToken)
+                try:
+                    success = do_work(config, db_conn, accessToken)
+                except TokenInvalidError:
+                    logger.warning("TP-Link token invalid, refreshing access token and retrying cycle")
+                    try:
+                        accessToken = getToken()
+                        success = do_work(config, db_conn, accessToken)
+                    except Exception as refresh_err:
+                        logger.error(f"Token refresh/retry failed: {refresh_err}", exc_info=True)
+                        success = False
                 
                 if success:
                     consecutive_failures = 0  # Reset failure counter on success
