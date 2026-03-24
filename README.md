@@ -536,13 +536,19 @@ TBD - To be determined with GOS team
 ---
 
 **Last Updated**: 2026-03-24  
-**Version**: 1.4.4  
+**Version**: 1.4.5  
 **Status**: ✅ Operational – Production on Linode, Pi400 as dev/staging  
 **Documentation**: All development notes and guides are in the [`docs/`](docs/) folder
 
 ---
 
 ## Release Notes
+
+### v1.4.5 (Collector POLL_INTERVAL + export sampling note - 2026-03-24)
+
+**Changed**
+- **Collector** now honors **`POLL_INTERVAL`** from the environment (e.g. Docker `.env`), matching what Compose already passed; previously only `app/config/config.yaml` `poller.interval` was used.
+- **Experiment export** README inside the ZIP explains that row spacing reflects **poll cadence**, not UI chart aggregation.
 
 ### v1.4.4 (Hotfix: experiment export datetimes - 2026-03-24)
 

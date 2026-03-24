@@ -1230,6 +1230,15 @@ history for the experiment time range and devices.
 
 Gallery snapshot ZIPs embed chart data at the aggregation interval chosen when the
 snapshot was saved — use this experiment export for complete raw series.
+
+Sampling rate (not aggregation)
+-------------------------------
+This file is still only as granular as the **collector**: each row is one reading from
+one poll cycle (one row per device per cycle). Cycles repeat every **poll interval**
+(typically 30s from config / POLL_INTERVAL env). If you see about **one row per device
+per minute**, the effective interval is ~60 seconds (check POLL_INTERVAL and
+app/config/config.yaml poller.interval). The Exploration chart’s “1 minute” dropdown
+is unrelated — that only affects the chart API’s time_bucket query, not this export.
 """
 
 

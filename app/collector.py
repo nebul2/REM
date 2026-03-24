@@ -18,6 +18,26 @@ logger = logging.getLogger(__name__)
 
 CONF_FILE = os.getenv("CONF_FILE", "/app/config/config.yaml")
 
+
+def _apply_poll_interval_env(config: dict) -> None:
+    """
+    Docker Compose sets POLL_INTERVAL; config.yaml provides the default.
+    Each device gets one reading per full poll cycle; cycle spacing = this interval (seconds).
+    """
+    raw = os.getenv("POLL_INTERVAL", "").strip()
+    if not raw:
+        return
+    try:
+        sec = int(raw)
+    except ValueError:
+        logger.warning("Ignoring invalid POLL_INTERVAL=%r", raw)
+        return
+    if sec < 5 or sec > 300:
+        logger.warning("Ignoring POLL_INTERVAL=%s (valid range 5–300 seconds)", sec)
+        return
+    config.setdefault("poller", {})["interval"] = sec
+    logger.info("Poll interval %ss from POLL_INTERVAL environment variable", sec)
+
 #visit this in browser first to get the 'code'
 # https://aps1-openapi.tplinknbu.com/v1/oauth/authorize?client_id=fdcae128-0adf-4233-8a58-30760652bd16&response_type=code&scope=all&state=123456789012345678901234&redirect_uri=https://www.greeningofstreaming.org
 
@@ -371,6 +391,8 @@ def main():
     config = load_config()
     if not config:
        sys.exit(1)
+
+    _apply_poll_interval_env(config)
 
     # Create the PostgreSQL/TimescaleDB connection
     db_conn = get_db_connection(config)

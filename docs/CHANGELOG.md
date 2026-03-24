@@ -5,6 +5,14 @@ All notable changes to the GOS REM system will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.5] - 2026-03-24
+
+### Added
+- Collector: `POLL_INTERVAL` environment variable now overrides `config.yaml` `poller.interval` (Docker Compose supplied it previously but the collector ignored it).
+
+### Changed
+- Experiment export ZIP `README_export.txt`: clarify that row spacing follows collector poll interval, not chart aggregation.
+
 ## [1.4.4] - 2026-03-24
 
 ### Fixed
