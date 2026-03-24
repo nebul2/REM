@@ -3,6 +3,7 @@ import requests
 import calendar
 import time
 import logging
+import json
 import os
 import sys
 import yaml
@@ -17,6 +18,10 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 CONF_FILE = os.getenv("CONF_FILE", "/app/config/config.yaml")
+# Same file the admin UI writes (see docker-compose: mount admin volume under /app/data/admin for collector)
+COLLECTOR_CONTROL_FILE = os.getenv("COLLECTOR_CONTROL_FILE", "/app/data/collector_control.json")
+
+_logged_poll_interval = None
 
 
 def _apply_poll_interval_env(config: dict) -> None:
@@ -37,6 +42,43 @@ def _apply_poll_interval_env(config: dict) -> None:
         return
     config.setdefault("poller", {})["interval"] = sec
     logger.info("Poll interval %ss from POLL_INTERVAL environment variable", sec)
+
+
+def _poll_interval_seconds(config: dict) -> int:
+    """
+    Seconds between full poll cycles (one sample per device per cycle).
+
+    Precedence:
+    1. collector_control.json (written by admin UI — must share volume with collector; see docker-compose)
+    2. config poller.interval (from POLL_INTERVAL env and/or config.yaml)
+    """
+    global _logged_poll_interval
+    sec = None
+    source = None
+    try:
+        if os.path.exists(COLLECTOR_CONTROL_FILE):
+            with open(COLLECTOR_CONTROL_FILE, "r", encoding="utf-8") as f:
+                control = json.load(f)
+            pi = control.get("poll_interval")
+            if pi is not None:
+                v = int(pi)
+                if 5 <= v <= 300:
+                    sec = v
+                    source = "collector_control.json (admin UI)"
+    except (TypeError, ValueError, OSError, json.JSONDecodeError) as e:
+        logger.warning("Could not read poll_interval from %s: %s", COLLECTOR_CONTROL_FILE, e)
+    except Exception as e:
+        logger.warning("Unexpected error reading %s: %s", COLLECTOR_CONTROL_FILE, e)
+
+    if sec is None:
+        sec = int(config["poller"]["interval"])
+        source = "config / POLL_INTERVAL env"
+
+    if sec != _logged_poll_interval:
+        logger.info("Using poll interval %ss from %s", sec, source)
+        _logged_poll_interval = sec
+    return sec
+
 
 #visit this in browser first to get the 'code'
 # https://aps1-openapi.tplinknbu.com/v1/oauth/authorize?client_id=fdcae128-0adf-4233-8a58-30760652bd16&response_type=code&scope=all&state=123456789012345678901234&redirect_uri=https://www.greeningofstreaming.org
@@ -201,15 +243,15 @@ def getDevicePowerList(deviceIdList, accessToken, config, db_conn):
     # Rate limit delay between device queries (seconds) to avoid API throttling
     # Read from collector control file if available, otherwise use config or default
     device_query_delay = 0.5  # Default
-    control_file = "/app/data/collector_control.json"
     try:
-        if os.path.exists(control_file):
-            import json
-            with open(control_file, 'r') as f:
+        if os.path.exists(COLLECTOR_CONTROL_FILE):
+            with open(COLLECTOR_CONTROL_FILE, "r", encoding="utf-8") as f:
                 control = json.load(f)
                 device_query_delay = control.get("device_query_delay", 0.5)
     except Exception as e:
-        logger.warning(f"Could not read device_query_delay from control file: {e}")
+        logger.warning(
+            "Could not read device_query_delay from %s: %s", COLLECTOR_CONTROL_FILE, e
+        )
     
     #walk through each device reading power
     for item in deviceIdList:
@@ -444,7 +486,7 @@ def main():
                         if consecutive_failures >= max_consecutive_failures:
                             logger.error(f"Too many consecutive failures ({consecutive_failures}), exiting")
                             sys.exit(1)
-                        time.sleep(int(config["poller"]["interval"]))
+                        time.sleep(_poll_interval_seconds(config))
                         continue
                     logger.info("Successfully reconnected to database")
                 
@@ -469,7 +511,7 @@ def main():
                         logger.error(f"Too many consecutive failures ({consecutive_failures}), exiting")
                         sys.exit(1)
                 
-                time.sleep(int(config["poller"]["interval"]))
+                time.sleep(_poll_interval_seconds(config))
                 
             except KeyboardInterrupt:
                 logger.info("Received keyboard interrupt, shutting down...")
@@ -481,7 +523,7 @@ def main():
                     logger.error(f"Too many consecutive failures ({consecutive_failures}), exiting")
                     sys.exit(1)
                 # Wait before retrying after an error
-                time.sleep(int(config["poller"]["interval"]))
+                time.sleep(_poll_interval_seconds(config))
                 
     finally:
         logger.info("Closing database connection...")

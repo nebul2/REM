@@ -1235,10 +1235,11 @@ Sampling rate (not aggregation)
 -------------------------------
 This file is still only as granular as the **collector**: each row is one reading from
 one poll cycle (one row per device per cycle). Cycles repeat every **poll interval**
-(typically 30s from config / POLL_INTERVAL env). If you see about **one row per device
-per minute**, the effective interval is ~60 seconds (check POLL_INTERVAL and
-app/config/config.yaml poller.interval). The Exploration chart’s “1 minute” dropdown
-is unrelated — that only affects the chart API’s time_bucket query, not this export.
+set in the Exploration UI (stored in collector_control.json) or failing that
+POLL_INTERVAL / config.yaml. Until v1.4.6, Docker split admin vs collector data
+volumes so **UI poll settings were ignored** — exports could look ~1–1.5 min even
+if the UI showed 10s. The Exploration chart’s “1 minute” dropdown is unrelated;
+that only affects the chart API’s time_bucket query, not this export.
 """
 
 

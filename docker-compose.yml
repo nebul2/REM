@@ -44,9 +44,13 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - CONF_FILE=/app/config/config.yaml
       - TOKEN_FILE=/app/data/refresh_token.txt
+      # Admin UI writes collector_control.json to admin-data; mount it here so the collector
+      # applies poll_interval / device_query_delay from the same file (see v1.4.6).
+      - COLLECTOR_CONTROL_FILE=/app/data/admin/collector_control.json
     volumes:
       - ./app/config:/app/config:ro
       - collector-data:/app/data
+      - admin-data:/app/data/admin:ro
     depends_on:
       timescaledb:
         condition: service_healthy

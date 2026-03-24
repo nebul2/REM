@@ -536,13 +536,20 @@ TBD - To be determined with GOS team
 ---
 
 **Last Updated**: 2026-03-24  
-**Version**: 1.4.5  
+**Version**: 1.4.6  
 **Status**: ✅ Operational – Production on Linode, Pi400 as dev/staging  
 **Documentation**: All development notes and guides are in the [`docs/`](docs/) folder
 
 ---
 
 ## Release Notes
+
+### v1.4.6 (Collector sees admin poll settings — 2026-03-24)
+
+**Fixed**
+- **Poll interval from the Exploration UI** (e.g. Ben’s 10s) was saved under the admin container’s data volume, while the collector read `collector_control.json` from a **separate** collector volume — so the running collector **never applied UI changes** and kept sleeping at yaml/env interval (~30–60s). The collector now mounts the admin data volume read-only and reads `COLLECTOR_CONTROL_FILE=/app/data/admin/collector_control.json`, and applies `poll_interval` from that file every cycle (takes precedence over `POLL_INTERVAL` / yaml).
+
+**Note:** Past experiment windows cannot be re-sampled; only **new** data reflects the corrected behavior.
 
 ### v1.4.5 (Collector POLL_INTERVAL + export sampling note - 2026-03-24)
 

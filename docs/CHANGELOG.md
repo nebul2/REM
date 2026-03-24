@@ -5,6 +5,11 @@ All notable changes to the GOS REM system will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.6] - 2026-03-24
+
+### Fixed
+- Collector ignored Exploration UI **poll interval** because `collector_control.json` lived on the **admin** Docker volume while the collector only saw the **collector** volume. Compose now mounts `admin-data` at `/app/data/admin` (read-only) in the collector service with `COLLECTOR_CONTROL_FILE=/app/data/admin/collector_control.json`. The collector applies `poll_interval` from that file each loop (overrides env/yaml).
+
 ## [1.4.5] - 2026-03-24
 
 ### Added
