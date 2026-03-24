@@ -536,13 +536,18 @@ TBD - To be determined with GOS team
 ---
 
 **Last Updated**: 2026-03-24  
-**Version**: 1.4.3  
+**Version**: 1.4.4  
 **Status**: ✅ Operational – Production on Linode, Pi400 as dev/staging  
 **Documentation**: All development notes and guides are in the [`docs/`](docs/) folder
 
 ---
 
 ## Release Notes
+
+### v1.4.4 (Hotfix: experiment export datetimes - 2026-03-24)
+
+**Fixed**
+- **“Download all data”** experiment export failed when experiment `time_range` stored naive ISO timestamps (no timezone) while “now” end time was UTC-aware. All bounds are normalized to UTC-aware before comparison and SQL.
 
 ### v1.4.3 (Hotfix: Starlette 1.x templates - 2026-03-24)
 

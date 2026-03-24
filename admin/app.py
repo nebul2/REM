@@ -546,6 +546,17 @@ def query_power_data(devices: List[str], start_time: str, end_time: str, interva
         raise HTTPException(status_code=500, detail=f"Failed to query data: {str(e)}")
 
 
+def _parse_iso_to_utc_aware(iso_str: str) -> datetime:
+    """Parse ISO timestamps from experiments/UI. Naive values are treated as UTC."""
+    if not iso_str or not str(iso_str).strip():
+        raise ValueError("empty datetime string")
+    s = str(iso_str).strip().replace("Z", "+00:00")
+    dt = datetime.fromisoformat(s)
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
 def resolve_experiment_devices_and_time_range(experiment_id: str) -> Tuple[Dict[str, Any], List[str], str, str]:
     """
     Load experiment, resolve device aliases from linked groups, and compute [start, end] ISO range.
@@ -603,8 +614,8 @@ def write_raw_power_readings_csv(
     Export every stored reading in gos_rem (no time-bucketing) — one row per poll per device.
     Returns number of data rows written (excluding header).
     """
-    start_dt = datetime.fromisoformat(start_iso.replace("Z", "+00:00"))
-    end_dt = datetime.fromisoformat(end_iso.replace("Z", "+00:00"))
+    start_dt = _parse_iso_to_utc_aware(start_iso)
+    end_dt = _parse_iso_to_utc_aware(end_iso)
     if end_dt < start_dt:
         raise HTTPException(status_code=400, detail="End time is before start time.")
 
