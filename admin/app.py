@@ -752,16 +752,20 @@ def _render_exploration(request: Request):
     host = request.headers.get("x-forwarded-host", request.headers.get("host", "localhost:7001"))
     base_url = f"{scheme}://{host}"
     
-    response = templates.TemplateResponse("exploration.html", {
-        "request": request,
-        "groups": groups,
-        "experiments": experiments,
-        "devices": devices,
-        "css_content": load_all_css(),
-        "logo_data_uri": get_logo_data_uri(),
-        "exploration_js": load_js_file("exploration.js"),
-        "base_url": base_url
-    })
+    # Starlette >=1.0: TemplateResponse(request, name, context)
+    response = templates.TemplateResponse(
+        request,
+        "exploration.html",
+        {
+            "groups": groups,
+            "experiments": experiments,
+            "devices": devices,
+            "css_content": load_all_css(),
+            "logo_data_uri": get_logo_data_uri(),
+            "exploration_js": load_js_file("exploration.js"),
+            "base_url": base_url,
+        },
+    )
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     response.headers["Pragma"] = "no-cache"
     response.headers["Expires"] = "0"
@@ -794,15 +798,18 @@ async def manage_groups(request: Request):
     host = request.headers.get("x-forwarded-host", request.headers.get("host", "localhost:7001"))
     base_url = f"{scheme}://{host}"
     
-    response = templates.TemplateResponse("index.html", {
-        "request": request,
-        "groups": groups,
-        "devices": devices,
-        "css_content": load_all_css(),
-        "logo_data_uri": get_logo_data_uri(),
-        "script_js": load_js_file("script.js"),
-        "base_url": base_url
-    })
+    response = templates.TemplateResponse(
+        request,
+        "index.html",
+        {
+            "groups": groups,
+            "devices": devices,
+            "css_content": load_all_css(),
+            "logo_data_uri": get_logo_data_uri(),
+            "script_js": load_js_file("script.js"),
+            "base_url": base_url,
+        },
+    )
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     response.headers["Pragma"] = "no-cache"
     response.headers["Expires"] = "0"
@@ -823,12 +830,15 @@ async def manage_experiments(request: Request):
     host = request.headers.get("x-forwarded-host", request.headers.get("host", "localhost:7001"))
     base_url = f"{scheme}://{host}"
     
-    response = templates.TemplateResponse("experiments.html", {
-        "request": request,
-        "css_content": load_all_css(),
-        "logo_data_uri": get_logo_data_uri(),
-        "base_url": base_url
-    })
+    response = templates.TemplateResponse(
+        request,
+        "experiments.html",
+        {
+            "css_content": load_all_css(),
+            "logo_data_uri": get_logo_data_uri(),
+            "base_url": base_url,
+        },
+    )
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     response.headers["Pragma"] = "no-cache"
     response.headers["Expires"] = "0"
@@ -843,12 +853,15 @@ async def admin_page(request: Request):
     host = request.headers.get("x-forwarded-host", request.headers.get("host", "localhost:7001"))
     base_url = f"{scheme}://{host}"
     
-    response = templates.TemplateResponse("admin.html", {
-        "request": request,
-        "css_content": load_all_css(),
-        "logo_data_uri": get_logo_data_uri(),
-        "base_url": base_url
-    })
+    response = templates.TemplateResponse(
+        request,
+        "admin.html",
+        {
+            "css_content": load_all_css(),
+            "logo_data_uri": get_logo_data_uri(),
+            "base_url": base_url,
+        },
+    )
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     response.headers["Pragma"] = "no-cache"
     response.headers["Expires"] = "0"
@@ -865,14 +878,17 @@ async def gallery(request: Request):
     host = request.headers.get("x-forwarded-host", request.headers.get("host", "localhost:7001"))
     base_url = f"{scheme}://{host}"
     
-    response = templates.TemplateResponse("gallery.html", {
-        "request": request,
-        "snapshots": snapshots,
-        "css_content": load_all_css(),
-        "logo_data_uri": get_logo_data_uri(),
-        "gallery_js": load_js_file("gallery.js"),
-        "base_url": base_url
-    })
+    response = templates.TemplateResponse(
+        request,
+        "gallery.html",
+        {
+            "snapshots": snapshots,
+            "css_content": load_all_css(),
+            "logo_data_uri": get_logo_data_uri(),
+            "gallery_js": load_js_file("gallery.js"),
+            "base_url": base_url,
+        },
+    )
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     response.headers["Pragma"] = "no-cache"
     response.headers["Expires"] = "0"

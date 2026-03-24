@@ -536,13 +536,18 @@ TBD - To be determined with GOS team
 ---
 
 **Last Updated**: 2026-03-24  
-**Version**: 1.4.2  
+**Version**: 1.4.3  
 **Status**: ✅ Operational – Production on Linode, Pi400 as dev/staging  
 **Documentation**: All development notes and guides are in the [`docs/`](docs/) folder
 
 ---
 
 ## Release Notes
+
+### v1.4.3 (Hotfix: Starlette 1.x templates - 2026-03-24)
+
+**Fixed**
+- **500 / Internal Server Error** on all HTML pages after dependency upgrades: Starlette 1.x requires `Jinja2Templates.TemplateResponse(request, name, context)` instead of `(name, context)`. All admin page renders were updated accordingly.
 
 ### v1.4.2 (Experiment full data export & UX - 2026-03-24)
 
