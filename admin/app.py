@@ -2,8 +2,8 @@
 GOS REM Data Exploration Tool - Complete Integrated Backend API
 Combines group management and data exploration functionality
 """
-from fastapi import FastAPI, Request, Form, HTTPException, Query, UploadFile, File
-from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, Response
+from fastapi import FastAPI, Request, Form, HTTPException, Query, UploadFile, File, BackgroundTasks
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, Response, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 import json
@@ -12,8 +12,10 @@ import re
 import uuid
 import subprocess
 from pathlib import Path
-from typing import List, Optional, Dict, Any
-from datetime import datetime, timedelta
+from typing import List, Optional, Dict, Any, Tuple
+from datetime import datetime, timedelta, timezone
+import shutil
+import tempfile
 import psycopg2
 from psycopg2.extras import RealDictCursor
 import numpy as np
@@ -544,6 +546,103 @@ def query_power_data(devices: List[str], start_time: str, end_time: str, interva
         raise HTTPException(status_code=500, detail=f"Failed to query data: {str(e)}")
 
 
+def resolve_experiment_devices_and_time_range(experiment_id: str) -> Tuple[Dict[str, Any], List[str], str, str]:
+    """
+    Load experiment, resolve device aliases from linked groups, and compute [start, end] ISO range.
+    End is 'now' for current experiments without an end time.
+    """
+    experiments = load_experiments()
+    if experiment_id not in experiments:
+        raise HTTPException(status_code=404, detail=f"Experiment '{experiment_id}' not found")
+    experiment = experiments[experiment_id]
+    groups_map = load_groups()
+
+    linked = experiment.get("linked_groups") or []
+    devices: List[str] = []
+    for gname in linked:
+        g = groups_map.get(gname) or {}
+        for d in g.get("devices") or []:
+            if d and d not in devices:
+                devices.append(d)
+
+    if not devices:
+        raise HTTPException(
+            status_code=400,
+            detail="This experiment has no devices: link at least one group that contains devices.",
+        )
+
+    tr = experiment.get("time_range") or {}
+    start_raw = tr.get("start")
+    if not start_raw:
+        raise HTTPException(
+            status_code=400,
+            detail="Experiment has no start time; set a time range before exporting.",
+        )
+    start_iso = start_raw
+    if experiment.get("is_current") and not tr.get("end"):
+        end_iso = datetime.now(timezone.utc).isoformat()
+    elif tr.get("end"):
+        end_iso = tr["end"]
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="Experiment has no end time. End the experiment or set an end time before exporting.",
+        )
+
+    return experiment, devices, start_iso, end_iso
+
+
+def write_raw_power_readings_csv(
+    devices: List[str],
+    start_iso: str,
+    end_iso: str,
+    out_path: Path,
+    timeout_seconds: int = 600,
+) -> int:
+    """
+    Export every stored reading in gos_rem (no time-bucketing) — one row per poll per device.
+    Returns number of data rows written (excluding header).
+    """
+    start_dt = datetime.fromisoformat(start_iso.replace("Z", "+00:00"))
+    end_dt = datetime.fromisoformat(end_iso.replace("Z", "+00:00"))
+    if end_dt < start_dt:
+        raise HTTPException(status_code=400, detail="End time is before start time.")
+
+    conn = get_db_connection(timeout_seconds=timeout_seconds)
+    row_count = 0
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT time, alias, power_watts
+            FROM gos_rem
+            WHERE time >= %s
+              AND time <= %s
+              AND alias = ANY(%s)
+            ORDER BY time ASC, alias ASC
+            """,
+            (start_dt, end_dt, devices),
+        )
+        with open(out_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["timestamp", "device_alias", "power_watts"])
+            while True:
+                batch = cur.fetchmany(8000)
+                if not batch:
+                    break
+                for time_val, alias, watts in batch:
+                    ts_out = time_val.isoformat() if hasattr(time_val, "isoformat") else str(time_val)
+                    if watts is None:
+                        writer.writerow([ts_out, alias, ""])
+                    else:
+                        writer.writerow([ts_out, alias, float(watts)])
+                    row_count += 1
+        cur.close()
+    finally:
+        conn.close()
+    return row_count
+
+
 def calculate_energy_stats(data: List[Dict], devices: List[str]) -> Dict[str, float]:
     """Calculate energy statistics from data"""
     if not data or not devices:
@@ -708,6 +807,12 @@ async def manage_groups(request: Request):
     response.headers["Pragma"] = "no-cache"
     response.headers["Expires"] = "0"
     return response
+
+
+@app.get("/experiment", response_class=RedirectResponse)
+async def experiment_alias():
+    """Singular path → Experiments manager (common bookmark typo)."""
+    return RedirectResponse(url="/experiments", status_code=307)
 
 
 @app.get("/experiments", response_class=HTMLResponse)
@@ -1074,6 +1179,89 @@ async def end_experiment(experiment_id: str):
     save_experiments(experiments)
     
     return JSONResponse(content={"success": True, "experiment": experiment})
+
+
+EXPORT_README_TEXT = """GOS REM — experiment data export
+================================
+
+power_readings.csv
+  Every row is one stored measurement from TimescaleDB (collector poll), with no
+  time-bucketing or averaging. Columns: timestamp, device_alias, power_watts.
+
+experiment_metadata.json
+  Experiment definition, linked groups, and export time window.
+
+annotations.json
+  Annotations recorded for this experiment (may be empty).
+
+How this differs from charts (Exploration page)
+-----------------------------------------------
+The Exploration charts call /api/data/power with an aggregation interval (e.g. 1 minute).
+The database aggregates with time_bucket(...) and AVG(power_watts) so the UI stays fast
+for long ranges. That is NOT the same as this export: this ZIP is the full-resolution
+history for the experiment time range and devices.
+
+Gallery snapshot ZIPs embed chart data at the aggregation interval chosen when the
+snapshot was saved — use this experiment export for complete raw series.
+"""
+
+
+@app.get("/api/experiments/{experiment_id}/export")
+async def export_experiment_full_data(experiment_id: str, background_tasks: BackgroundTasks):
+    """
+    Download all power readings (raw DB rows) for an experiment's time range and linked devices,
+    plus metadata and annotations, as a ZIP file.
+    """
+    experiment, devices, start_iso, end_iso = resolve_experiment_devices_and_time_range(experiment_id)
+
+    workdir = tempfile.mkdtemp(prefix="gos-exp-export-")
+    zip_path = Path(workdir) / f"experiment-{experiment_id}-export.zip"
+    try:
+        csv_path = Path(workdir) / "power_readings.csv"
+        row_count = write_raw_power_readings_csv(devices, start_iso, end_iso, csv_path)
+
+        annotations_all = load_annotations()
+        ann_for_exp = {
+            k: v
+            for k, v in annotations_all.items()
+            if v.get("experiment_id") == experiment_id
+        }
+
+        meta = {
+            "experiment_id": experiment_id,
+            "experiment": experiment,
+            "device_aliases": devices,
+            "time_range": {"start": start_iso, "end": end_iso},
+            "export_row_count": row_count,
+            "exported_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+        with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            zf.write(csv_path, arcname="power_readings.csv")
+            zf.writestr("experiment_metadata.json", json.dumps(meta, indent=2))
+            zf.writestr("annotations.json", json.dumps(ann_for_exp, indent=2))
+            zf.writestr("README_export.txt", EXPORT_README_TEXT)
+
+        safe_slug = re.sub(r"[^a-zA-Z0-9._-]+", "_", experiment.get("name") or experiment_id)[:80]
+        download_name = f"{safe_slug}_full_export.zip"
+
+        background_tasks.add_task(shutil.rmtree, workdir, True)
+
+        return FileResponse(
+            path=str(zip_path),
+            filename=download_name,
+            media_type="application/zip",
+        )
+    except HTTPException:
+        shutil.rmtree(workdir, ignore_errors=True)
+        raise
+    except Exception as e:
+        shutil.rmtree(workdir, ignore_errors=True)
+        print(f"Error exporting experiment {experiment_id}: {e}")
+        import traceback
+
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")
 
 
 # ============================================================================

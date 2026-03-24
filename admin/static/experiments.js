@@ -40,6 +40,7 @@ async function loadExperiments() {
                 <div class="group-header">
                     <h3>${experiment.name || experimentId}${isCurrent ? ' <span style="color: #e74c3c;">(Current)</span>' : ''}</h3>
                     <div class="group-actions">
+                        <button type="button" onclick="downloadExperimentExport(event, '${experimentId}')" class="btn btn-small" title="ZIP: raw power readings (every poll), metadata, annotations">Download all data</button>
                         <button onclick="editExperiment('${experimentId}')" class="btn btn-small">Edit</button>
                         <button onclick="deleteExperiment('${experimentId}')" class="btn btn-small btn-danger">Delete</button>
                     </div>
@@ -65,6 +66,52 @@ async function loadExperiments() {
     } catch (error) {
         console.error('Error loading experiments:', error);
         document.getElementById('experimentsList').innerHTML = `<p class="error">Error loading experiments: ${error.message}</p>`;
+    }
+}
+
+// Download full experiment data (raw DB readings + metadata ZIP)
+async function downloadExperimentExport(ev, experimentId) {
+    const btn = ev && ev.target;
+    if (btn && btn.disabled) return;
+    const prev = btn ? btn.textContent : '';
+    try {
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = 'Preparing…';
+        }
+        const url = `/api/experiments/${encodeURIComponent(experimentId)}/export`;
+        const response = await fetch(url);
+        if (!response.ok) {
+            let detail = response.statusText;
+            try {
+                const err = await response.json();
+                detail = err.detail || detail;
+            } catch (e) {
+                /* ignore */
+            }
+            throw new Error(detail);
+        }
+        const cd = response.headers.get('Content-Disposition');
+        let filename = `experiment-${experimentId}-export.zip`;
+        if (cd && cd.includes('filename=')) {
+            const m = cd.match(/filename="?([^";]+)"?/);
+            if (m) filename = m[1].trim();
+        }
+        const blob = await response.blob();
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(a.href);
+    } catch (e) {
+        alert(`Export failed: ${e.message || e}`);
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = prev;
+        }
     }
 }
 

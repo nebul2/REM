@@ -535,14 +535,29 @@ TBD - To be determined with GOS team
 
 ---
 
-**Last Updated**: 2026-03-11  
-**Version**: 1.4.0  
+**Last Updated**: 2026-03-24  
+**Version**: 1.4.2  
 **Status**: ✅ Operational – Production on Linode, Pi400 as dev/staging  
 **Documentation**: All development notes and guides are in the [`docs/`](docs/) folder
 
 ---
 
 ## Release Notes
+
+### v1.4.2 (Experiment full data export & UX - 2026-03-24)
+
+**What's New**
+- **Experiment “Download all data”** — ZIP export of every stored power reading (one row per collector poll) for the experiment time range and devices from linked groups, plus `experiment_metadata.json`, `annotations.json`, and `README_export.txt` explaining the difference vs chart aggregation.
+- **API** — `GET /api/experiments/{experiment_id}/export` returns that ZIP (same auth rules as the rest of the admin UI).
+- **Routing** — `GET /experiment` redirects to `/experiments` (307) for common bookmark typos.
+- **Copy** — Experiments and Exploration pages clarify that Exploration charts use aggregated series; this export is full-resolution history.
+
+See [`docs/CHANGELOG.md`](docs/CHANGELOG.md) for the full changelog.
+
+### v1.4.1 (Collector token recovery - 2026-03-23)
+
+**Fixed**
+- Collector no longer stalls silently when the TP-Link cloud returns **token invalid** (`-10902`): it refreshes the OAuth token and retries the polling cycle, and prefers the persisted rotating refresh token on disk.
 
 ### v1.4.0 (Initial Linode Production Release - 2026-03-11)
 

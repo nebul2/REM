@@ -5,6 +5,32 @@ All notable changes to the GOS REM system will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.2] - 2026-03-24
+
+### Added
+- **Experiment full data export**: ZIP download with `power_readings.csv` (raw `gos_rem` rows, batched query), `experiment_metadata.json`, `annotations.json`, and `README_export.txt` documenting raw vs aggregated chart data.
+- **API**: `GET /api/experiments/{experiment_id}/export`.
+- **Redirect**: `GET /experiment` → `/experiments` (307).
+
+### Changed
+- Experiments list UI: “Download all data” button per experiment; help text on Experiments and Exploration pages about aggregation vs full export.
+
+## [1.4.1] - 2026-03-23
+
+### Fixed
+- Collector: recover from TP-Link **token invalid** (`-10902`) by refreshing OAuth token and retrying; prefer persisted refresh token file for rotation.
+
+### Changed
+- Removed token value prints from collector logs.
+
+## [1.4.0] - 2026-03-11
+
+### Added
+- Production deployment documentation for Akamai Linode; optional HTTP Basic Auth (`ADMIN_BASIC_USER` / `ADMIN_BASIC_PASSWORD`); Caddy for HTTPS (Let's Encrypt).
+
+### Changed
+- README and deployment targets: Linode production, Pi400 dev/staging.
+
 ## [1.3.2] - 2025-12-17
 
 ### Removed
