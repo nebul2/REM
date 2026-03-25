@@ -1231,15 +1231,25 @@ history for the experiment time range and devices.
 Gallery snapshot ZIPs embed chart data at the aggregation interval chosen when the
 snapshot was saved — use this experiment export for complete raw series.
 
-Sampling rate (not aggregation)
--------------------------------
-This file is still only as granular as the **collector**: each row is one reading from
-one poll cycle (one row per device per cycle). Cycles repeat every **poll interval**
-set in the Exploration UI (stored in collector_control.json) or failing that
-POLL_INTERVAL / config.yaml. Until v1.4.6, Docker split admin vs collector data
-volumes so **UI poll settings were ignored** — exports could look ~1–1.5 min even
-if the UI showed 10s. The Exploration chart’s “1 minute” dropdown is unrelated;
-that only affects the chart API’s time_bucket query, not this export.
+Sampling rate (not aggregation) — how “10s polling” actually behaves
+----------------------------------------------------------------------
+The collector walks **every** energy device **in sequence** (TP-Link API + optional
+delay between calls), writes one row per device, then **sleeps** for the “polling
+frequency” seconds (e.g. 10) before starting the next full round.
+
+So for a **given device**, time between its rows ≈ **(duration of one full round) +
+(sleep interval)** — not the sleep value alone. With ~30 devices, a round often
+takes ~50–70s; plus 10s sleep → **~60–80s** between samples **for that device**, even
+when the UI says 10s. That matches “70s” or “60s + 10s” reports; it is not the chart
+aggregator adding 60s.
+
+To get closer to 10s **per device** you would need fewer devices in the fleet, much
+lower per-device delay, and/or a different architecture (parallel requests — not
+implemented here). The Exploration chart “aggregation” dropdown only affects
+**queries** for the graph (time_bucket), not this CSV.
+
+Historical note: before v1.4.6 the collector could ignore UI poll settings (separate
+Docker volumes); that is fixed — but the round-robin timing above always applied.
 """
 
 

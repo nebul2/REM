@@ -535,14 +535,19 @@ TBD - To be determined with GOS team
 
 ---
 
-**Last Updated**: 2026-03-24  
-**Version**: 1.4.6  
+**Last Updated**: 2026-03-25  
+**Version**: 1.4.7  
 **Status**: ✅ Operational – Production on Linode, Pi400 as dev/staging  
 **Documentation**: All development notes and guides are in the [`docs/`](docs/) folder
 
 ---
 
 ## Release Notes
+
+### v1.4.7 (Clarify polling frequency vs per-device cadence — 2026-03-25)
+
+**Documentation / UX**
+- **“Polling frequency”** in Exploration is the **sleep after one full sequential pass over all devices**, not the time between samples for a single device. Per-device spacing ≈ **round duration + sleep** (often ~60–80s with many plugs). Export README and Exploration copy updated so “10s + 60s” confusion is explained.
 
 ### v1.4.6 (Collector sees admin poll settings — 2026-03-24)
 

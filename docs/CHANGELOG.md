@@ -5,6 +5,11 @@ All notable changes to the GOS REM system will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.7] - 2026-03-25
+
+### Changed
+- Exploration UI and experiment export `README_export.txt`: document that poll interval is **pause between full collection rounds** (all devices sequentially); per-device sample period ≈ round duration + interval, not the interval alone.
+
 ## [1.4.6] - 2026-03-24
 
 ### Fixed
