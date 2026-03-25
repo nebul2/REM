@@ -108,3 +108,16 @@ sed -i.bak 's/^POLL_INTERVAL=.*/POLL_INTERVAL=30/' .env
 docker-compose restart collector
 ```
 
+## Benchmark (round time vs 10s target)
+
+The collector sleeps **`poll_interval`** seconds **after** each full round (device list + every plug). Per-device sample spacing ≈ **round duration + poll_interval**.
+
+From the repo root, with the stack running:
+
+```bash
+./scripts/run_benchmark_poll.sh --rounds 5
+./scripts/run_benchmark_poll.sh --sweep --rounds 3 --target-cadence 10
+```
+
+This runs **`benchmark_poll_cycle.py`** inside the collector container (no DB writes). Use **`--sweep`** to try several `parallel_workers` values and pick the fastest mean round time, then set that value in the Exploration UI (or `COLLECTOR_PARALLEL_WORKERS`).
+

@@ -544,6 +544,16 @@ TBD - To be determined with GOS team
 
 ## Release Notes
 
+### v1.5.2 (TP-Link adaptive backoff + UI — 2026-03-25)
+
+**Added**
+- **Adaptive backoff** when the TP-Link cloud signals overload (HTTP 429/503, rate-limit style messages): the collector **calms down** (longer sleep, fewer parallel workers, more chunk delay) and **recovers** after clean cycles. Status is written to **`collector_status.json`** and shown under **Exploration → TP-Link cloud / throttling** (effective settings, health, reset button). Toggle **`adaptive_backoff`** in the UI or JSON.
+
+### v1.5.1 (Poll benchmark — 2026-03-25)
+
+**Added**
+- **`benchmark_poll_cycle.py`** (in the collector image): time full TP-Link rounds and compare **effective cadence** (round + poll interval) to your target (e.g. 10s). **`./scripts/run_benchmark_poll.sh`** or `docker compose exec collector python /app/benchmark_poll_cycle.py --sweep --rounds 3`.
+
 ### v1.5.0 (Parallel TP-Link device polling — 2026-03-25)
 
 **Added**

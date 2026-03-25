@@ -15,6 +15,9 @@ POSTGRES_PASSWORD=change-me-in-production
 POLL_INTERVAL=30
 # Optional: force concurrent device API calls (1–32). When set, overrides parallel_workers in collector_control.json.
 # COLLECTOR_PARALLEL_WORKERS=8
+# COLLECTOR_STATUS_FILE=/app/data/admin/collector_status.json
+# COLLECTOR_BACKOFF_RECOVER_STREAK=3
+# COLLECTOR_TPLINK_502_IS_OVERLOAD=0
 LOG_LEVEL=INFO
 
 # Admin UI Settings

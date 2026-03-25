@@ -8,6 +8,7 @@ import os
 import sys
 import yaml
 import psycopg2
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from psycopg2.extras import execute_values
 
@@ -21,8 +22,78 @@ logger = logging.getLogger(__name__)
 CONF_FILE = os.getenv("CONF_FILE", "/app/config/config.yaml")
 # Same file the admin UI writes (see docker-compose: mount admin volume under /app/data/admin for collector)
 COLLECTOR_CONTROL_FILE = os.getenv("COLLECTOR_CONTROL_FILE", "/app/data/collector_control.json")
+# Runtime status for admin UI (same volume as control; collector must mount admin-data rw)
+COLLECTOR_STATUS_FILE = os.getenv(
+    "COLLECTOR_STATUS_FILE",
+    os.path.join(os.path.dirname(COLLECTOR_CONTROL_FILE), "collector_status.json"),
+)
 
 _logged_poll_interval = None
+
+# Per-cycle TP-Link rate-limit / overload hits (threads update from parallel device polls)
+_rate_lock = threading.Lock()
+_rate_hits = 0
+
+
+def reset_rate_limit_hits() -> None:
+    global _rate_hits
+    with _rate_lock:
+        _rate_hits = 0
+
+
+def note_rate_limit() -> None:
+    global _rate_hits
+    with _rate_lock:
+        _rate_hits += 1
+
+
+def get_rate_limit_hits() -> int:
+    with _rate_lock:
+        return _rate_hits
+
+
+def _tplink_msg_suggests_rate_limit(resp_json: dict) -> bool:
+    if not isinstance(resp_json, dict):
+        return False
+    msg = (
+        str(
+            resp_json.get("errMessage")
+            or resp_json.get("message")
+            or resp_json.get("msg")
+            or ""
+        )
+    ).lower()
+    if not msg:
+        return False
+    keywords = (
+        "rate",
+        "limit",
+        "too many",
+        "frequent",
+        "overload",
+        "throttl",
+        "busy",
+        "try again",
+        "later",
+        "quota",
+        "exceed",
+    )
+    return any(k in msg for k in keywords)
+
+
+def _tplink_is_rate_limited_http(status_code: int, resp_json: dict) -> bool:
+    if status_code == 429:
+        return True
+    # 503 often means overload; 502 can be transient — opt-in via env
+    if status_code == 503:
+        return True
+    if status_code == 502 and os.getenv("COLLECTOR_TPLINK_502_IS_OVERLOAD", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    ):
+        return True
+    return _tplink_msg_suggests_rate_limit(resp_json)
 
 
 def _apply_poll_interval_env(config: dict) -> None:
@@ -92,6 +163,178 @@ class TokenInvalidError(RuntimeError):
     pass
 
 
+class RateLimitError(RuntimeError):
+    """Raised when TP-Link cloud signals rate limit or overload (e.g. getDeviceList)."""
+    pass
+
+
+def _control_defaults() -> dict:
+    return {
+        "enabled": True,
+        "poll_interval": 30,
+        "device_query_delay": 0.5,
+        "parallel_workers": 8,
+        "adaptive_backoff": True,
+    }
+
+
+def read_collector_control() -> dict:
+    """Full control dict with defaults (for adaptive backoff)."""
+    out = _control_defaults()
+    try:
+        if os.path.exists(COLLECTOR_CONTROL_FILE):
+            with open(COLLECTOR_CONTROL_FILE, "r", encoding="utf-8") as f:
+                raw = json.load(f)
+            if isinstance(raw, dict):
+                out.update(raw)
+    except (OSError, json.JSONDecodeError, TypeError) as e:
+        logger.warning("Could not read collector control: %s", e)
+    return out
+
+
+class AdaptiveBackoff:
+    """
+    Reduce load when TP-Link signals rate limit / overload; recover after clean cycles.
+
+    Effective settings scale from configured UI values — does not rewrite collector_control.json.
+    """
+
+    def __init__(self, status_path: str):
+        self.status_path = status_path
+        self.level = 0
+        self.success_streak = 0
+        self.total_rate_events = 0
+        self.last_cycle_rate_hits = 0
+        self._load_state()
+
+    def _load_state(self) -> None:
+        try:
+            if os.path.exists(self.status_path):
+                with open(self.status_path, "r", encoding="utf-8") as f:
+                    d = json.load(f)
+                st = d.get("adaptive_state") or {}
+                self.level = max(0, min(8, int(st.get("backoff_level", 0))))
+                self.success_streak = max(0, int(st.get("success_streak", 0)))
+                self.total_rate_events = int(st.get("total_rate_events", 0))
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
+            pass
+
+    def _success_streak_needed(self) -> int:
+        try:
+            return max(2, min(10, int(os.getenv("COLLECTOR_BACKOFF_RECOVER_STREAK", "3"))))
+        except ValueError:
+            return 3
+
+    def effective(self, control: dict) -> dict:
+        base_pi = int(control.get("poll_interval") or 30)
+        base_pi = max(5, min(300, base_pi))
+        base_w = _parse_parallel_workers(control)
+        base_d = float(control.get("device_query_delay", 0.5))
+        base_d = max(0.0, min(5.0, base_d))
+
+        if not control.get("adaptive_backoff", True):
+            return {
+                "poll_interval": base_pi,
+                "parallel_workers": base_w,
+                "device_query_delay": base_d,
+                "backoff_level": 0,
+            }
+
+        lv = self.level
+        mult = 2 ** min(lv, 4)
+        eff_pi = min(300, base_pi * mult)
+        eff_w = max(1, base_w - (lv + 1) // 2)
+        eff_d = min(5.0, base_d + 0.25 * lv)
+
+        return {
+            "poll_interval": eff_pi,
+            "parallel_workers": eff_w,
+            "device_query_delay": eff_d,
+            "backoff_level": lv,
+        }
+
+    def reset(self) -> None:
+        """Clear backoff (e.g. admin requested)."""
+        self.level = 0
+        self.success_streak = 0
+
+    def record_cycle(self, rate_hits: int, cycle_completed: bool) -> None:
+        self.last_cycle_rate_hits = rate_hits
+        if rate_hits > 0:
+            self.total_rate_events += rate_hits
+            self.success_streak = 0
+            self.level = min(8, self.level + 1)
+            logger.warning(
+                "TP-Link rate limit / overload: %s event(s) this cycle; "
+                "adaptive backoff level now %s (calmer settings until recovery)",
+                rate_hits,
+                self.level,
+            )
+        elif cycle_completed:
+            self.success_streak += 1
+            need = self._success_streak_needed()
+            if self.level > 0 and self.success_streak >= need:
+                self.level = max(0, self.level - 1)
+                self.success_streak = 0
+                logger.info(
+                    "Adaptive backoff: recovered one step (level now %s after %s clean cycles)",
+                    self.level,
+                    need,
+                )
+
+    def write_status_file(
+        self,
+        control: dict,
+        eff: dict,
+        *,
+        rate_hits: int,
+        cycle_completed: bool,
+        last_error: str | None = None,
+    ) -> None:
+        try:
+            ts_utc = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            if rate_hits > 0:
+                health = "throttled"
+            elif self.level > 0:
+                health = "recovering"
+            else:
+                health = "ok"
+
+            payload = {
+                "updated_at": ts_utc,
+                "health": health,
+                "adaptive_backoff_enabled": bool(control.get("adaptive_backoff", True)),
+                "configured": {
+                    "poll_interval": int(control.get("poll_interval") or 30),
+                    "parallel_workers": _parse_parallel_workers(control),
+                    "device_query_delay": float(control.get("device_query_delay", 0.5)),
+                },
+                "effective": {
+                    "poll_interval": eff["poll_interval"],
+                    "parallel_workers": eff["parallel_workers"],
+                    "device_query_delay": eff["device_query_delay"],
+                    "backoff_level": eff.get("backoff_level", 0),
+                },
+                "adaptive_state": {
+                    "backoff_level": self.level,
+                    "success_streak": self.success_streak,
+                    "total_rate_events": self.total_rate_events,
+                    "rate_limit_hits_last_cycle": rate_hits,
+                },
+                "last_cycle_ok": cycle_completed,
+                "last_error": last_error or "",
+            }
+            d = os.path.dirname(self.status_path)
+            if d:
+                os.makedirs(d, exist_ok=True)
+            tmp = self.status_path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(payload, f, indent=2)
+            os.replace(tmp, self.status_path)
+        except OSError as e:
+            logger.warning("Could not write collector status file %s: %s", self.status_path, e)
+
+
 def getToken():
     # Load refresh token, preferring the persisted token file.
     # TP-Link rotates refresh tokens, so persisted token is usually newest.
@@ -149,15 +392,29 @@ def getDeviceIdList(accessToken):
     getDevlistdata = {'client_id': 'fdcae128-0adf-4233-8a58-30760652bd16', 'api_key': 'e71bf02f-8b71-42ee-8af0-62a7bdf6c866', 'token': accessToken}
     try:
         devList = requests.post(devListurl, data=getDevlistdata, timeout=15)
-        resp = devList.json()
     except Exception as e:
         logger.error(f"TP-Link getDeviceList request failed: {e}")
         return []
+
+    try:
+        resp = devList.json()
+    except Exception:
+        resp = {}
+
+    if not isinstance(resp, dict):
+        resp = {}
+
+    if _tplink_is_rate_limited_http(devList.status_code, resp):
+        raise RateLimitError(
+            f"TP-Link getDeviceList rate limited or overloaded: HTTP {devList.status_code} {resp}"
+        )
 
     if resp.get('errorCode') == TOKEN_INVALID_ERROR_CODE or str(resp.get("errMessage", "")).lower() == "token invalid":
         raise TokenInvalidError(f"TP-Link token invalid: {resp}")
 
     if resp.get('errorCode') or resp.get('error'):
+        if _tplink_msg_suggests_rate_limit(resp):
+            raise RateLimitError(f"TP-Link getDeviceList rate limited: {resp}")
         logger.error(f"TP-Link getDeviceList API error: {resp}")
         return []
 
@@ -214,26 +471,48 @@ def getDevPower(deviceId, accessToken):
         getDevpowerlistdata={"method": "getDeviceRealTimeEnergy", "device": {"id": deviceId }}
         session = requests.Session()
         session.headers.update({'Content-Type': 'application/json'})
-        
-        # Add timeout to prevent hanging
+
         devPowerlist = session.post(devPowerurl, json=getDevpowerlistdata, timeout=10)
-        
-        # Check if request was successful
-        devPowerlist.raise_for_status()
-        
-        response_json = devPowerlist.json()
-        
+
+        try:
+            response_json = devPowerlist.json()
+        except Exception:
+            response_json = {}
+
+        if not isinstance(response_json, dict):
+            response_json = {}
+
+        if _tplink_is_rate_limited_http(devPowerlist.status_code, response_json):
+            note_rate_limit()
+            logger.warning(
+                "TP-Link rate limit/overload on device %s: HTTP %s %s",
+                deviceId,
+                devPowerlist.status_code,
+                response_json,
+            )
+            return None
+
+        if devPowerlist.status_code >= 400:
+            devPowerlist.raise_for_status()
+
+        if _tplink_msg_suggests_rate_limit(response_json):
+            note_rate_limit()
+            logger.warning(
+                "TP-Link rate-limit style message for device %s: %s",
+                deviceId,
+                response_json,
+            )
+            return None
+
         # Check if response has expected structure
         if 'result' not in response_json or 'powerWatts' not in response_json.get('result', {}):
             logger.warning(f"Unexpected API response structure for device {deviceId}: {response_json}")
             return None
-        
+
         power_watts = response_json['result']['powerWatts']
-        
-        # Validate the value is numeric
+
         try:
             power_float = float(power_watts)
-            # Reject negative values (power can't be negative)
             if power_float < 0:
                 logger.warning(f"Invalid power reading for device {deviceId}: {power_float}W (negative)")
                 return None
@@ -241,9 +520,16 @@ def getDevPower(deviceId, accessToken):
         except (ValueError, TypeError):
             logger.warning(f"Non-numeric power reading for device {deviceId}: {power_watts}")
             return None
-            
+
     except requests.exceptions.Timeout:
         logger.error(f"Timeout reading device {deviceId} (API took >10s)")
+        return None
+    except requests.exceptions.HTTPError as e:
+        if e.response is not None and e.response.status_code == 429:
+            note_rate_limit()
+            logger.warning("HTTP 429 for device %s", deviceId)
+            return None
+        logger.error(f"HTTP error reading device {deviceId}: {e}")
         return None
     except requests.exceptions.RequestException as e:
         logger.error(f"Network error reading device {deviceId}: {e}")
@@ -262,53 +548,33 @@ def _poll_one_device(item, accessToken):
     return item["alias"], power
 
 
-def getDevicePowerList(deviceIdList, accessToken, config, db_conn):
-    """Poll all devices and write valid readings to database. Skips failed devices."""
-    devicePowerList = []
+def collect_power_readings(deviceIdList, accessToken, parallel_workers, device_query_delay):
+    """
+    Poll all devices (sequential or parallel chunks) and return points + failures.
+    Used by getDevicePowerList and benchmark_poll_cycle.
+    """
     points_buffer = []
     failed_devices = []
-    
-    control = {}
-    device_query_delay = 0.5  # Default; between chunks when parallel, or between devices when sequential
-    try:
-        if os.path.exists(COLLECTOR_CONTROL_FILE):
-            with open(COLLECTOR_CONTROL_FILE, "r", encoding="utf-8") as f:
-                control = json.load(f)
-                device_query_delay = float(control.get("device_query_delay", 0.5))
-    except Exception as e:
-        logger.warning(
-            "Could not read collector control from %s: %s", COLLECTOR_CONTROL_FILE, e
-        )
-
-    parallel_workers = _parse_parallel_workers(control)
+    device_query_delay = float(device_query_delay)
 
     if parallel_workers <= 1:
-        # Legacy sequential path (one HTTP at a time)
         for item in deviceIdList:
-            device_id = item['deviceId']
-            alias = item['alias']
-            
+            device_id = item["deviceId"]
+            alias = item["alias"]
             devPower = getDevPower(device_id, accessToken)
-            
             if devPower is None:
                 failed_devices.append(alias)
                 if device_query_delay > 0:
                     time.sleep(device_query_delay)
                 continue
-            
             current_GMT = time.gmtime()
             timestamp = calendar.timegm(current_GMT)
-            
-            points_buffer.append({
-                'alias': alias,
-                'power_watts': float(devPower),
-                'time': timestamp
-            })
-            
+            points_buffer.append(
+                {"alias": alias, "power_watts": float(devPower), "time": timestamp}
+            )
             if device_query_delay > 0:
                 time.sleep(device_query_delay)
     else:
-        # Parallel: up to `parallel_workers` concurrent TP-Link calls per chunk; optional delay between chunks
         chunks = list(_chunked(deviceIdList, parallel_workers))
         for ci, chunk in enumerate(chunks):
             with ThreadPoolExecutor(max_workers=len(chunk)) as pool:
@@ -322,20 +588,61 @@ def getDevicePowerList(deviceIdList, accessToken, config, db_conn):
                         continue
                     current_GMT = time.gmtime()
                     timestamp = calendar.timegm(current_GMT)
-                    points_buffer.append({
-                        'alias': alias,
-                        'power_watts': float(devPower),
-                        'time': timestamp
-                    })
+                    points_buffer.append(
+                        {
+                            "alias": alias,
+                            "power_watts": float(devPower),
+                            "time": timestamp,
+                        }
+                    )
             if device_query_delay > 0 and ci < len(chunks) - 1:
                 time.sleep(device_query_delay)
-        if parallel_workers > 1:
-            logger.info(
-                "Parallel device polling: up to %d workers per chunk, %d chunk(s), inter-chunk delay %ss",
-                parallel_workers,
-                len(chunks),
-                device_query_delay,
-            )
+
+    return points_buffer, failed_devices
+
+
+def getDevicePowerList(
+    deviceIdList,
+    accessToken,
+    config,
+    db_conn,
+    parallel_workers_override=None,
+    device_query_delay_override=None,
+):
+    """Poll all devices and write valid readings to database. Skips failed devices."""
+    devicePowerList = []
+
+    control = {}
+    device_query_delay = 0.5  # Default; between chunks when parallel, or between devices when sequential
+    try:
+        if os.path.exists(COLLECTOR_CONTROL_FILE):
+            with open(COLLECTOR_CONTROL_FILE, "r", encoding="utf-8") as f:
+                control = json.load(f)
+                device_query_delay = float(control.get("device_query_delay", 0.5))
+    except Exception as e:
+        logger.warning(
+            "Could not read collector control from %s: %s", COLLECTOR_CONTROL_FILE, e
+        )
+
+    if device_query_delay_override is not None:
+        device_query_delay = float(device_query_delay_override)
+    if parallel_workers_override is not None:
+        parallel_workers = max(1, min(32, int(parallel_workers_override)))
+    else:
+        parallel_workers = _parse_parallel_workers(control)
+    chunks = list(_chunked(deviceIdList, parallel_workers)) if parallel_workers > 1 else []
+
+    points_buffer, failed_devices = collect_power_readings(
+        deviceIdList, accessToken, parallel_workers, device_query_delay
+    )
+
+    if parallel_workers > 1:
+        logger.info(
+            "Parallel device polling: up to %d workers per chunk, %d chunk(s), inter-chunk delay %ss (effective)",
+            parallel_workers,
+            len(chunks),
+            device_query_delay,
+        )
     
     # Log summary of polling results
     successful_count = len(points_buffer)
@@ -370,17 +677,34 @@ def load_config():
     return config
 
 
-def pollCloud(config, db_conn, accessToken):
-    deviceIdList = getDeviceIdList(accessToken)
-    devicePowerList = getDevicePowerList(deviceIdList, accessToken, config, db_conn)
-    return 
+def pollCloud(config, db_conn, accessToken, eff):
+    """eff: dict from AdaptiveBackoff.effective() with parallel_workers and device_query_delay."""
+    reset_rate_limit_hits()
+    try:
+        deviceIdList = getDeviceIdList(accessToken)
+    except RateLimitError as e:
+        logger.warning("%s", e)
+        note_rate_limit()
+        return
+
+    if not deviceIdList:
+        logger.warning("No TP-Link devices to poll (empty list)")
+        return
+
+    getDevicePowerList(
+        deviceIdList,
+        accessToken,
+        config,
+        db_conn,
+        parallel_workers_override=eff.get("parallel_workers"),
+        device_query_delay_override=eff.get("device_query_delay"),
+    )
 
 
-def do_work(config, db_conn, accessToken):
+def do_work(config, db_conn, accessToken, eff):
     """Execute one collection cycle. Returns True on success, False on failure."""
     try:
-        #lets go get a list of the devices and their power
-        pollCloud(config, db_conn, accessToken)
+        pollCloud(config, db_conn, accessToken, eff)
         return True
     except TokenInvalidError:
         # Allow caller to refresh token and retry
@@ -507,23 +831,44 @@ def main():
             persist = True
 
     if not persist:
-        # Trigger the poller as a one-shot thing
+        # Trigger the poller as a one-shot thing (no adaptive backoff file)
+        eff_once = {
+            "parallel_workers": None,
+            "device_query_delay": None,
+        }
         try:
-            do_work(config, db_conn, accessToken)
+            do_work(config, db_conn, accessToken, eff_once)
         except TokenInvalidError:
             logger.warning("TP-Link token invalid in one-shot mode, refreshing token and retrying once")
             accessToken = getToken()
-            do_work(config, db_conn, accessToken)
+            do_work(config, db_conn, accessToken, eff_once)
         db_conn.close()
         return
 
     # Otherwise, set up a loop and poll periodically
     consecutive_failures = 0
     max_consecutive_failures = 10  # Exit after 10 consecutive failures
-    
+    backoff = AdaptiveBackoff(COLLECTOR_STATUS_FILE)
+    last_eff = None
+    last_err = ""
+    reset_touch = os.path.join(
+        os.path.dirname(COLLECTOR_CONTROL_FILE), "reset_backoff"
+    )
+
     try:
         while True:
             try:
+                control = read_collector_control()
+                if os.path.exists(reset_touch):
+                    try:
+                        os.unlink(reset_touch)
+                    except OSError:
+                        pass
+                    backoff.reset()
+                    logger.info("Adaptive backoff reset (operator requested via admin UI)")
+
+                last_eff = backoff.effective(control)
+
                 # Check if database connection is still alive, reconnect if needed
                 try:
                     test_cursor = db_conn.cursor()
@@ -542,22 +887,38 @@ def main():
                         if consecutive_failures >= max_consecutive_failures:
                             logger.error(f"Too many consecutive failures ({consecutive_failures}), exiting")
                             sys.exit(1)
-                        time.sleep(_poll_interval_seconds(config))
+                        sleep_s = (
+                            last_eff["poll_interval"]
+                            if last_eff
+                            else _poll_interval_seconds(config)
+                        )
+                        time.sleep(sleep_s)
                         continue
                     logger.info("Successfully reconnected to database")
-                
-                # Execute collection cycle
+
+                last_err = ""
                 try:
-                    success = do_work(config, db_conn, accessToken)
+                    success = do_work(config, db_conn, accessToken, last_eff)
                 except TokenInvalidError:
                     logger.warning("TP-Link token invalid, refreshing access token and retrying cycle")
                     try:
                         accessToken = getToken()
-                        success = do_work(config, db_conn, accessToken)
+                        success = do_work(config, db_conn, accessToken, last_eff)
                     except Exception as refresh_err:
+                        last_err = str(refresh_err)
                         logger.error(f"Token refresh/retry failed: {refresh_err}", exc_info=True)
                         success = False
-                
+
+                rate_hits = get_rate_limit_hits()
+                backoff.record_cycle(rate_hits, success)
+                backoff.write_status_file(
+                    control,
+                    last_eff,
+                    rate_hits=rate_hits,
+                    cycle_completed=bool(success),
+                    last_error=last_err or None,
+                )
+
                 if success:
                     consecutive_failures = 0  # Reset failure counter on success
                 else:
@@ -566,20 +927,26 @@ def main():
                     if consecutive_failures >= max_consecutive_failures:
                         logger.error(f"Too many consecutive failures ({consecutive_failures}), exiting")
                         sys.exit(1)
-                
-                time.sleep(_poll_interval_seconds(config))
-                
+
+                sleep_s = last_eff["poll_interval"]
+                time.sleep(sleep_s)
+
             except KeyboardInterrupt:
                 logger.info("Received keyboard interrupt, shutting down...")
                 break
             except Exception as e:
                 consecutive_failures += 1
+                last_err = str(e)
                 logger.error(f"Unexpected error in main loop: {e}", exc_info=True)
                 if consecutive_failures >= max_consecutive_failures:
                     logger.error(f"Too many consecutive failures ({consecutive_failures}), exiting")
                     sys.exit(1)
-                # Wait before retrying after an error
-                time.sleep(_poll_interval_seconds(config))
+                sleep_s = (
+                    last_eff["poll_interval"]
+                    if last_eff
+                    else _poll_interval_seconds(config)
+                )
+                time.sleep(sleep_s)
                 
     finally:
         logger.info("Closing database connection...")

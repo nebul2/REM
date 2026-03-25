@@ -5,6 +5,24 @@ All notable changes to the GOS REM system will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.2] - 2026-03-25
+
+### Added
+- **TP-Link adaptive backoff**: detects HTTP **429**, **503**, and rate-limit style API messages; automatically increases sleep between rounds, reduces parallel workers, and adds inter-chunk delay (without editing saved UI settings). Recovers stepwise after several clean cycles (`COLLECTOR_BACKOFF_RECOVER_STREAK`, default 3).
+- **`collector_status.json`** (next to `collector_control.json`): runtime health (`ok` / `recovering` / `throttled`), effective vs configured settings, counters. Exploration UI **TP-Link cloud / throttling** panel; **Reset throttle** touches `reset_backoff`; **Adaptive backoff** toggle (`adaptive_backoff` in control JSON).
+- **`POST /api/collector/control`**: optional `adaptive_backoff`, `reset_backoff` (no container restart unless interval/workers/delay/enabled change).
+
+### Changed
+- **docker-compose**: collector mounts `admin-data` **read-write** and sets **`COLLECTOR_STATUS_FILE`** so the collector can write status and read throttle reset. **`docker-compose.nas.yml`**: admin mount rw + status env.
+
+## [1.5.1] - 2026-03-25
+
+### Added
+- **`app/benchmark_poll_cycle.py`**: measures mean **round duration** (device list + all power reads, no DB writes). Reports **effective cadence** ≈ round + `poll_interval` vs a target (default 10s). Optional **`--sweep`** tries multiple `parallel_workers` values and suggests the fastest stable setting. **`scripts/run_benchmark_poll.sh`** runs it inside the collector container.
+
+### Changed
+- Collector: polling logic extracted to **`collect_power_readings()`** for reuse by the benchmark (behavior unchanged).
+
 ## [1.5.0] - 2026-03-25
 
 ### Added

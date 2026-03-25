@@ -533,6 +533,22 @@ function setupEventListeners() {
             }
         });
     }
+
+    const updateAdaptiveBackoffBtn = document.getElementById('updateAdaptiveBackoff');
+    if (updateAdaptiveBackoffBtn) {
+        updateAdaptiveBackoffBtn.addEventListener('click', async () => {
+            const checked = document.getElementById('adaptiveBackoffEnabled')?.checked ?? true;
+            await postAdaptiveBackoff(checked);
+        });
+    }
+    const resetThrottleBtn = document.getElementById('resetThrottleBtn');
+    if (resetThrottleBtn) {
+        resetThrottleBtn.addEventListener('click', async () => {
+            if (confirm('Reset adaptive throttle to baseline? The collector applies this on the next cycle.')) {
+                await postResetThrottle();
+            }
+        });
+    }
     
     // Load collector status on page load
     loadCollectorStatus();
@@ -3071,6 +3087,48 @@ async function loadCollectorStatus() {
         if (parallelWorkersInput) {
             parallelWorkersInput.value = data.parallel_workers ?? 8;
         }
+
+        const adaptiveEl = document.getElementById('adaptiveBackoffEnabled');
+        if (adaptiveEl) {
+            adaptiveEl.checked = data.adaptive_backoff !== false;
+        }
+
+        const health = data.tp_link_health || 'unknown';
+        const healthLabel = document.getElementById('tpLinkHealthLabel');
+        const healthBadge = document.getElementById('tpLinkHealthBadge');
+        if (healthLabel) {
+            const labels = {
+                ok: 'OK — normal',
+                recovering: 'Recovering — easing throttle',
+                throttled: 'Throttled — cloud pushback detected',
+                unknown: 'Unknown (collector status file not seen yet)',
+            };
+            healthLabel.textContent = labels[health] || health;
+        }
+        if (healthBadge) {
+            healthBadge.textContent = health;
+            const colors = {
+                ok: { bg: '#d4edda', fg: '#155724' },
+                recovering: { bg: '#fff3cd', fg: '#856404' },
+                throttled: { bg: '#f8d7da', fg: '#721c24' },
+                unknown: { bg: '#e9ecef', fg: '#495057' },
+            };
+            const c = colors[health] || colors.unknown;
+            healthBadge.style.background = c.bg;
+            healthBadge.style.color = c.fg;
+        }
+
+        const setText = (id, val, fallback) => {
+            const el = document.getElementById(id);
+            if (el) el.textContent = val != null ? String(val) : fallback;
+        };
+        setText('effectivePollInterval', data.effective_poll_interval, '—');
+        setText('effectiveParallelWorkers', data.effective_parallel_workers, '—');
+        setText('effectiveDeviceQueryDelay', data.effective_device_query_delay, '—');
+        setText('backoffLevel', data.backoff_level, '0');
+        setText('rateLimitHitsLast', data.rate_limit_hits_last_cycle, '—');
+        setText('totalRateEvents', data.total_rate_events, '—');
+        setText('statusUpdatedAt', data.status_updated_at || '—', '—');
     } catch (error) {
         // Silently fail for collector status - don't spam console
         // Only log if it's not a network/timeout error
@@ -3211,6 +3269,48 @@ async function updateDeviceQueryDelay(delay) {
     } catch (error) {
         console.error('Error updating device query delay:', error);
         alert('Error updating device query delay: ' + error.message);
+    }
+}
+
+async function postAdaptiveBackoff(enabled) {
+    try {
+        const formData = new FormData();
+        formData.append('adaptive_backoff', enabled ? 'true' : 'false');
+        const response = await fetch('/api/collector/control', {
+            method: 'POST',
+            body: formData
+        });
+        const data = await response.json();
+        if (data.success) {
+            await loadCollectorStatus();
+            alert('Adaptive backoff setting saved (no restart required).');
+        } else {
+            alert('Failed to save adaptive backoff');
+        }
+    } catch (error) {
+        console.error('Error saving adaptive backoff:', error);
+        alert('Error: ' + error.message);
+    }
+}
+
+async function postResetThrottle() {
+    try {
+        const formData = new FormData();
+        formData.append('reset_backoff', 'true');
+        const response = await fetch('/api/collector/control', {
+            method: 'POST',
+            body: formData
+        });
+        const data = await response.json();
+        if (data.success) {
+            await loadCollectorStatus();
+            alert('Reset requested. The collector clears throttle on the next cycle.');
+        } else {
+            alert('Failed to request reset');
+        }
+    } catch (error) {
+        console.error('Error requesting throttle reset:', error);
+        alert('Error: ' + error.message);
     }
 }
 

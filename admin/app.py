@@ -119,6 +119,8 @@ ANNOTATIONS_FILE = DATA_DIR / "annotations.json"
 SNAPSHOTS_FILE = DATA_DIR / "snapshots.json"
 SNAPSHOTS_DIR = DATA_DIR / "snapshots"
 COLLECTOR_CONTROL_FILE = DATA_DIR / "collector_control.json"
+COLLECTOR_STATUS_FILE = DATA_DIR / "collector_status.json"
+COLLECTOR_RESET_BACKOFF_FILE = DATA_DIR / "reset_backoff"
 
 # Ensure directories exist
 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -1706,20 +1708,41 @@ async def delete_snapshot(snapshot_id: str):
 # API Endpoints - Collector Control
 # ============================================================================
 
+def _default_collector_control() -> dict:
+    return {
+        "enabled": True,
+        "poll_interval": 30,
+        "device_query_delay": 0.5,
+        "parallel_workers": 8,
+        "adaptive_backoff": True,
+    }
+
+
 @app.get("/api/collector/status")
 async def get_collector_status():
-    """Get collector status and settings"""
+    """Get collector status and settings (including TP-Link adaptive throttle runtime)."""
+    control = _default_collector_control()
     if COLLECTOR_CONTROL_FILE.exists():
         try:
             with open(COLLECTOR_CONTROL_FILE, 'r') as f:
-                control = json.load(f)
-        except:
-            control = {"enabled": True, "poll_interval": 30, "device_query_delay": 0.5, "parallel_workers": 8}
-    else:
-        control = {"enabled": True, "poll_interval": 30, "device_query_delay": 0.5, "parallel_workers": 8}
-    
+                raw = json.load(f)
+            if isinstance(raw, dict):
+                control.update(raw)
+        except Exception:
+            pass
+
+    runtime = {}
+    if COLLECTOR_STATUS_FILE.exists():
+        try:
+            with open(COLLECTOR_STATUS_FILE, 'r') as f:
+                runtime = json.load(f)
+        except Exception:
+            pass
+
+    eff = runtime.get("effective") or {}
+    st = runtime.get("adaptive_state") or {}
+
     # Check if collector is actually running by checking for recent data
-    # If there's data in the last 2 minutes, the collector is running
     running = False
     try:
         conn = get_db_connection()
@@ -1737,13 +1760,23 @@ async def get_collector_status():
     except Exception as e:
         print(f"Error checking collector status from database: {e}")
         running = False
-    
+
     return JSONResponse(content={
         "enabled": control.get("enabled", True),
         "poll_interval": control.get("poll_interval", 30),
         "device_query_delay": control.get("device_query_delay", 0.5),
         "parallel_workers": control.get("parallel_workers", 8),
-        "running": running
+        "adaptive_backoff": control.get("adaptive_backoff", True),
+        "running": running,
+        "tp_link_health": runtime.get("health", "unknown"),
+        "effective_poll_interval": eff.get("poll_interval"),
+        "effective_parallel_workers": eff.get("parallel_workers"),
+        "effective_device_query_delay": eff.get("device_query_delay"),
+        "backoff_level": st.get("backoff_level", 0),
+        "rate_limit_hits_last_cycle": st.get("rate_limit_hits_last_cycle", 0),
+        "total_rate_events": st.get("total_rate_events", 0),
+        "status_updated_at": runtime.get("updated_at"),
+        "runtime": runtime,
     })
 
 
@@ -1753,54 +1786,74 @@ async def control_collector(
     poll_interval: Optional[int] = Form(None),
     device_query_delay: Optional[float] = Form(None),
     parallel_workers: Optional[int] = Form(None),
+    adaptive_backoff: Optional[str] = Form(None),
+    reset_backoff: Optional[str] = Form(None),
 ):
-    """Control collector settings"""
-    # Load current settings
+    """Control collector settings. reset_backoff touches a file the collector reads (no container restart)."""
+    control = _default_collector_control()
     if COLLECTOR_CONTROL_FILE.exists():
         try:
             with open(COLLECTOR_CONTROL_FILE, 'r') as f:
-                control = json.load(f)
-        except:
-            control = {"enabled": True, "poll_interval": 30, "device_query_delay": 0.5, "parallel_workers": 8}
-    else:
-        control = {"enabled": True, "poll_interval": 30, "device_query_delay": 0.5, "parallel_workers": 8}
-    
-    # Update settings
+                raw = json.load(f)
+            if isinstance(raw, dict):
+                control.update(raw)
+        except Exception:
+            pass
+
+    if reset_backoff and str(reset_backoff).lower() in ("1", "true", "yes", "on"):
+        try:
+            COLLECTOR_RESET_BACKOFF_FILE.parent.mkdir(parents=True, exist_ok=True)
+            COLLECTOR_RESET_BACKOFF_FILE.touch()
+        except OSError as e:
+            raise HTTPException(status_code=500, detail=f"Could not request backoff reset: {e}")
+
+    control_dirty = False
+    if adaptive_backoff is not None:
+        control["adaptive_backoff"] = str(adaptive_backoff).lower() in ("1", "true", "yes", "on")
+        control_dirty = True
+
     if enabled is not None:
         control["enabled"] = enabled
+        control_dirty = True
     if poll_interval is not None:
         if poll_interval < 5 or poll_interval > 300:
             raise HTTPException(status_code=400, detail="Poll interval must be between 5 and 300 seconds")
         control["poll_interval"] = poll_interval
+        control_dirty = True
     if device_query_delay is not None:
         if device_query_delay < 0 or device_query_delay > 5:
             raise HTTPException(status_code=400, detail="Device query delay must be between 0 and 5 seconds")
         control["device_query_delay"] = device_query_delay
+        control_dirty = True
     if parallel_workers is not None:
         if parallel_workers < 1 or parallel_workers > 32:
             raise HTTPException(status_code=400, detail="Parallel workers must be between 1 and 32 (1 = sequential)")
         control["parallel_workers"] = parallel_workers
-    
-    # Save settings
-    try:
-        COLLECTOR_CONTROL_FILE.parent.mkdir(parents=True, exist_ok=True)
-        with open(COLLECTOR_CONTROL_FILE, 'w') as f:
-            json.dump(control, f, indent=2)
-    except Exception as e:
-        print(f"Error saving collector control: {e}")
-        raise HTTPException(status_code=500, detail="Failed to save collector settings")
-    
-    # Restart collector container to apply changes
-    try:
-        subprocess.run(
-            ["docker", "compose", "-f", "/app/docker-compose.yml", "restart", "collector"],
-            timeout=10,
-            capture_output=True
-        )
-    except Exception as e:
-        print(f"Error restarting collector: {e}")
-        # Don't fail the request if restart fails
-    
+        control_dirty = True
+
+    if control_dirty:
+        try:
+            COLLECTOR_CONTROL_FILE.parent.mkdir(parents=True, exist_ok=True)
+            with open(COLLECTOR_CONTROL_FILE, 'w') as f:
+                json.dump(control, f, indent=2)
+        except Exception as e:
+            print(f"Error saving collector control: {e}")
+            raise HTTPException(status_code=500, detail="Failed to save collector settings")
+
+    restart_needed = any(
+        x is not None
+        for x in (enabled, poll_interval, device_query_delay, parallel_workers)
+    )
+    if restart_needed:
+        try:
+            subprocess.run(
+                ["docker", "compose", "-f", "/app/docker-compose.yml", "restart", "collector"],
+                timeout=10,
+                capture_output=True
+            )
+        except Exception as e:
+            print(f"Error restarting collector: {e}")
+
     return JSONResponse(content={"success": True, "control": control})
 
 

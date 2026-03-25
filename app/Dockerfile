@@ -20,9 +20,10 @@ RUN mkdir -p /app/data /app/config
 
 # Copy application files
 COPY collector.py .
+COPY benchmark_poll_cycle.py .
 
 # Make collector executable
-RUN chmod +x collector.py
+RUN chmod +x collector.py benchmark_poll_cycle.py
 
 # Health check endpoint (we'll add a simple HTTP server later if needed)
 # For now, check if process is running

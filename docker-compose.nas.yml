@@ -51,12 +51,13 @@ services:
       - CONF_FILE=/app/config/config.yaml
       - TOKEN_FILE=/app/data/refresh_token.txt
       - COLLECTOR_CONTROL_FILE=/app/data/admin/collector_control.json
+      - COLLECTOR_STATUS_FILE=/app/data/admin/collector_status.json
     volumes:
       - ./app/config:/app/config:ro
       # Store collector data on NAS
       - ${NAS_DATA_PATH:-/home/pi/nas/gos_stats}/collector:/app/data
-      # Admin UI writes collector_control.json under admin dir — mount read-only for poll settings
-      - ${NAS_DATA_PATH:-/home/pi/nas/gos_stats}/admin:/app/data/admin:ro
+      # Admin UI data — rw so collector can write collector_status.json and reset_backoff
+      - ${NAS_DATA_PATH:-/home/pi/nas/gos_stats}/admin:/app/data/admin
     depends_on:
       timescaledb:
         condition: service_healthy

@@ -49,10 +49,12 @@ services:
       # Admin UI writes collector_control.json to admin-data; mount it here so the collector
       # applies poll_interval / device_query_delay from the same file (see v1.4.6).
       - COLLECTOR_CONTROL_FILE=/app/data/admin/collector_control.json
+      # Runtime status + reset_backoff touch file (collector writes status; reads reset flag)
+      - COLLECTOR_STATUS_FILE=/app/data/admin/collector_status.json
     volumes:
       - ./app/config:/app/config:ro
       - collector-data:/app/data
-      - admin-data:/app/data/admin:ro
+      - admin-data:/app/data/admin
     depends_on:
       timescaledb:
         condition: service_healthy

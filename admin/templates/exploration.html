@@ -257,6 +257,34 @@
                     <span style="color: #e74c3c;">⚠️ With parallel workers &gt;1: delay <strong>between chunks</strong> of concurrent calls. With workers =1: delay between each device (sequential).</span>
                 </p>
             </div>
+
+            <div class="control-group" style="border-top: 1px solid var(--gos-border); padding-top: 14px; margin-top: 14px;">
+                <label>TP-Link cloud / throttling:</label>
+                <p style="font-size: 0.9rem; margin: 8px 0; line-height: 1.5;">
+                    Status: <strong id="tpLinkHealthLabel">—</strong>
+                    <span id="tpLinkHealthBadge" style="margin-left: 8px; padding: 2px 8px; border-radius: 4px; font-size: 0.8rem; background: #eee;">—</span>
+                </p>
+                <p style="font-size: 0.82rem; color: #555; margin: 6px 0;">
+                    <strong>Effective</strong> (after adaptive throttle): poll <span id="effectivePollInterval">—</span>s · workers <span id="effectiveParallelWorkers">—</span> · chunk delay <span id="effectiveDeviceQueryDelay">—</span>s
+                    · backoff level <span id="backoffLevel">0</span>
+                </p>
+                <p style="font-size: 0.8rem; color: #666; margin: 4px 0;">
+                    Last cycle: <span id="rateLimitHitsLast">—</span> rate-limit / overload signal(s) · total events (session): <span id="totalRateEvents">—</span>
+                    · status file: <span id="statusUpdatedAt">—</span>
+                </p>
+                <label class="toggle-label" style="display: flex; align-items: center; gap: 10px; margin-top: 10px;">
+                    <input type="checkbox" id="adaptiveBackoffEnabled" checked>
+                    <span>Adaptive backoff</span>
+                    <span style="font-size: 0.8rem; color: #666;">(slow down automatically on 429 / overload; recover after clean cycles)</span>
+                </label>
+                <div style="margin-top: 10px;">
+                    <button type="button" id="updateAdaptiveBackoff" class="btn btn-secondary" style="margin-right: 8px;">Save backoff setting</button>
+                    <button type="button" id="resetThrottleBtn" class="btn btn-secondary">Reset throttle now</button>
+                </div>
+                <p style="font-size: 0.78rem; color: #777; margin-top: 8px; max-width: 52rem; line-height: 1.45;">
+                    The collector detects HTTP 429, 502/503, and “rate limit / too many” style API messages. When triggered, it increases sleep between rounds, reduces parallel workers, and adds delay between chunks until responses are clean again.
+                </p>
+            </div>
         </section>
         
         <!-- Stats Explanation -->
