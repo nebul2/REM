@@ -229,7 +229,19 @@
                     Current: <span id="currentPollInterval">-</span>s — sleep after the collector finishes <strong>one pass over all devices</strong> (not per-device sample spacing).
                 </p>
                 <p style="font-size: 0.82rem; color: #555; margin-top: 8px; line-height: 1.45; max-width: 52rem;">
-                    Each device is read <strong>once per round</strong>; a round takes roughly (number of devices × (API time + device delay)). Typical spacing for the <strong>same</strong> device is <strong>round duration + this value</strong> — often about <strong>60–80s</strong> with a large fleet even at 10s here. Experiment CSV exports reflect that; chart “aggregation” is separate (query bucketing only).
+                    Each device is read <strong>once per round</strong>. Round duration depends on how many TP-Link calls run in parallel (see below) and this sleep. Typical spacing for the <strong>same</strong> device is <strong>round duration + this value</strong>. Chart “aggregation” is separate (query bucketing only).
+                </p>
+            </div>
+            
+            <div class="control-group">
+                <label>Parallel device polls (per chunk):</label>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <input type="number" id="parallelWorkers" min="1" max="32" value="8" step="1" style="width: 80px; padding: 8px; border: 2px solid var(--gos-border); border-radius: 6px;">
+                    <span>workers</span>
+                    <button id="updateParallelWorkers" class="btn btn-primary" style="margin-left: 10px;">Update</button>
+                </div>
+                <p style="font-size: 0.85rem; color: #666; margin-top: 5px;">
+                    Current: <span id="currentParallelWorkers">-</span> — concurrent TP-Link requests per wave (1 = slow sequential). Waves are spaced by <strong>Device query delay</strong> between chunks. If the cloud returns 429 errors, reduce workers or increase delay.
                 </p>
             </div>
             
@@ -242,7 +254,7 @@
                 </div>
                 <p style="font-size: 0.85rem; color: #666; margin-top: 5px;">
                     Current: <span id="currentDeviceQueryDelay">-</span>s | 
-                    <span style="color: #e74c3c;">⚠️ Delay between each device API call to avoid rate limits (0 = no delay)</span>
+                    <span style="color: #e74c3c;">⚠️ With parallel workers &gt;1: delay <strong>between chunks</strong> of concurrent calls. With workers =1: delay between each device (sequential).</span>
                 </p>
             </div>
         </section>

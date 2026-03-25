@@ -536,13 +536,20 @@ TBD - To be determined with GOS team
 ---
 
 **Last Updated**: 2026-03-25  
-**Version**: 1.4.7  
+**Version**: 1.5.0  
 **Status**: ✅ Operational – Production on Linode, Pi400 as dev/staging  
 **Documentation**: All development notes and guides are in the [`docs/`](docs/) folder
 
 ---
 
 ## Release Notes
+
+### v1.5.0 (Parallel TP-Link device polling — 2026-03-25)
+
+**Added**
+- **Parallel device polls**: the collector can run up to **N** concurrent `getDeviceRealTimeEnergy` calls per chunk (default **8**, range 1–32). Devices are processed in waves; **Device query delay** applies **between chunks** when N is greater than 1, or between each device when N is 1 (sequential).
+- **Exploration UI** control for parallel workers; **`COLLECTOR_PARALLEL_WORKERS`** env can override the JSON setting for ops.
+- Substantially shorter **round duration**, so per-device sample spacing can approach **round time + sleep** with a much smaller round time (e.g. ~10–20s instead of ~60s+ for large fleets when parallel is enabled).
 
 ### v1.4.7 (Clarify polling frequency vs per-device cadence — 2026-03-25)
 

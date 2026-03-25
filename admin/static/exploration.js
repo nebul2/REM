@@ -522,6 +522,18 @@ function setupEventListeners() {
         });
     }
     
+    const updateParallelWorkersBtn = document.getElementById('updateParallelWorkers');
+    if (updateParallelWorkersBtn) {
+        updateParallelWorkersBtn.addEventListener('click', async () => {
+            const w = parseInt(document.getElementById('parallelWorkers').value, 10);
+            if (w >= 1 && w <= 32) {
+                await updateParallelWorkers(w);
+            } else {
+                alert('Parallel workers must be between 1 and 32');
+            }
+        });
+    }
+    
     // Load collector status on page load
     loadCollectorStatus();
     
@@ -3050,6 +3062,15 @@ async function loadCollectorStatus() {
         if (deviceQueryDelayInput) {
             deviceQueryDelayInput.value = data.device_query_delay ?? 0.5;
         }
+        
+        const currentParallelWorkers = document.getElementById('currentParallelWorkers');
+        const parallelWorkersInput = document.getElementById('parallelWorkers');
+        if (currentParallelWorkers) {
+            currentParallelWorkers.textContent = data.parallel_workers ?? 8;
+        }
+        if (parallelWorkersInput) {
+            parallelWorkersInput.value = data.parallel_workers ?? 8;
+        }
     } catch (error) {
         // Silently fail for collector status - don't spam console
         // Only log if it's not a network/timeout error
@@ -3125,6 +3146,33 @@ async function updatePollInterval(interval) {
     } catch (error) {
         console.error('Error updating poll interval:', error);
         alert('Error updating polling interval: ' + error.message);
+    }
+}
+
+async function updateParallelWorkers(workers) {
+    try {
+        const formData = new FormData();
+        formData.append('parallel_workers', workers);
+        const response = await fetch('/api/collector/control', {
+            method: 'POST',
+            body: formData
+        });
+        const data = await response.json();
+        if (data.success) {
+            await loadCollectorStatus();
+            const el = document.getElementById('currentParallelWorkers');
+            if (el) {
+                el.textContent = workers;
+                el.style.color = '#27ae60';
+                setTimeout(() => { if (el) el.style.color = ''; }, 2000);
+            }
+            alert(`Parallel workers set to ${workers}. Collector will restart. Use 1 for legacy sequential polling.`);
+        } else {
+            alert('Failed to update parallel workers');
+        }
+    } catch (error) {
+        console.error('Error updating parallel workers:', error);
+        alert('Error updating parallel workers: ' + error.message);
     }
 }
 

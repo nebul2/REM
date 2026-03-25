@@ -1243,10 +1243,12 @@ takes ~50–70s; plus 10s sleep → **~60–80s** between samples **for that dev
 when the UI says 10s. That matches “70s” or “60s + 10s” reports; it is not the chart
 aggregator adding 60s.
 
-To get closer to 10s **per device** you would need fewer devices in the fleet, much
-lower per-device delay, and/or a different architecture (parallel requests — not
-implemented here). The Exploration chart “aggregation” dropdown only affects
-**queries** for the graph (time_bucket), not this CSV.
+The collector can issue **parallel** TP-Link requests in chunks (see Exploration
+“Parallel device polls”). That shortens each **round** so per-device spacing can
+approach (round time + sleep) with a much smaller round time than sequential polling.
+
+The Exploration chart “aggregation” dropdown only affects **queries** for the graph
+(time_bucket), not this CSV.
 
 Historical note: before v1.4.6 the collector could ignore UI poll settings (separate
 Docker volumes); that is fixed — but the round-robin timing above always applied.
@@ -1712,9 +1714,9 @@ async def get_collector_status():
             with open(COLLECTOR_CONTROL_FILE, 'r') as f:
                 control = json.load(f)
         except:
-            control = {"enabled": True, "poll_interval": 30, "device_query_delay": 0.5}
+            control = {"enabled": True, "poll_interval": 30, "device_query_delay": 0.5, "parallel_workers": 8}
     else:
-        control = {"enabled": True, "poll_interval": 30, "device_query_delay": 0.5}
+        control = {"enabled": True, "poll_interval": 30, "device_query_delay": 0.5, "parallel_workers": 8}
     
     # Check if collector is actually running by checking for recent data
     # If there's data in the last 2 minutes, the collector is running
@@ -1740,6 +1742,7 @@ async def get_collector_status():
         "enabled": control.get("enabled", True),
         "poll_interval": control.get("poll_interval", 30),
         "device_query_delay": control.get("device_query_delay", 0.5),
+        "parallel_workers": control.get("parallel_workers", 8),
         "running": running
     })
 
@@ -1748,7 +1751,8 @@ async def get_collector_status():
 async def control_collector(
     enabled: Optional[bool] = Form(None),
     poll_interval: Optional[int] = Form(None),
-    device_query_delay: Optional[float] = Form(None)
+    device_query_delay: Optional[float] = Form(None),
+    parallel_workers: Optional[int] = Form(None),
 ):
     """Control collector settings"""
     # Load current settings
@@ -1757,9 +1761,9 @@ async def control_collector(
             with open(COLLECTOR_CONTROL_FILE, 'r') as f:
                 control = json.load(f)
         except:
-            control = {"enabled": True, "poll_interval": 30, "device_query_delay": 0.5}
+            control = {"enabled": True, "poll_interval": 30, "device_query_delay": 0.5, "parallel_workers": 8}
     else:
-        control = {"enabled": True, "poll_interval": 30, "device_query_delay": 0.5}
+        control = {"enabled": True, "poll_interval": 30, "device_query_delay": 0.5, "parallel_workers": 8}
     
     # Update settings
     if enabled is not None:
@@ -1772,6 +1776,10 @@ async def control_collector(
         if device_query_delay < 0 or device_query_delay > 5:
             raise HTTPException(status_code=400, detail="Device query delay must be between 0 and 5 seconds")
         control["device_query_delay"] = device_query_delay
+    if parallel_workers is not None:
+        if parallel_workers < 1 or parallel_workers > 32:
+            raise HTTPException(status_code=400, detail="Parallel workers must be between 1 and 32 (1 = sequential)")
+        control["parallel_workers"] = parallel_workers
     
     # Save settings
     try:

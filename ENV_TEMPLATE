@@ -13,6 +13,8 @@ POSTGRES_PASSWORD=change-me-in-production
 
 # Collector Settings
 POLL_INTERVAL=30
+# Optional: force concurrent device API calls (1–32). When set, overrides parallel_workers in collector_control.json.
+# COLLECTOR_PARALLEL_WORKERS=8
 LOG_LEVEL=INFO
 
 # Admin UI Settings

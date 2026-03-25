@@ -8,6 +8,7 @@ import os
 import sys
 import yaml
 import psycopg2
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from psycopg2.extras import execute_values
 
 # Configure logging
@@ -185,6 +186,27 @@ def getDeviceIdList(accessToken):
     return deviceIdList
 
 
+def _parse_parallel_workers(control: dict) -> int:
+    """Concurrent device API calls per chunk (1 = legacy sequential). Env overrides if set."""
+    raw_env = os.getenv("COLLECTOR_PARALLEL_WORKERS", "").strip()
+    if raw_env:
+        try:
+            n = int(raw_env)
+        except ValueError:
+            n = 8
+    else:
+        try:
+            n = int(control.get("parallel_workers", 8))
+        except (TypeError, ValueError):
+            n = 8
+    return max(1, min(32, n))
+
+
+def _chunked(items, size):
+    for i in range(0, len(items), size):
+        yield items[i : i + size]
+
+
 def getDevPower(deviceId, accessToken):
     """Get power reading from a device. Returns None on failure."""
     try:
@@ -234,52 +256,86 @@ def getDevPower(deviceId, accessToken):
         return None
 
 
+def _poll_one_device(item, accessToken):
+    """Worker: return (alias, power or None)."""
+    power = getDevPower(item["deviceId"], accessToken)
+    return item["alias"], power
+
+
 def getDevicePowerList(deviceIdList, accessToken, config, db_conn):
     """Poll all devices and write valid readings to database. Skips failed devices."""
     devicePowerList = []
     points_buffer = []
     failed_devices = []
     
-    # Rate limit delay between device queries (seconds) to avoid API throttling
-    # Read from collector control file if available, otherwise use config or default
-    device_query_delay = 0.5  # Default
+    control = {}
+    device_query_delay = 0.5  # Default; between chunks when parallel, or between devices when sequential
     try:
         if os.path.exists(COLLECTOR_CONTROL_FILE):
             with open(COLLECTOR_CONTROL_FILE, "r", encoding="utf-8") as f:
                 control = json.load(f)
-                device_query_delay = control.get("device_query_delay", 0.5)
+                device_query_delay = float(control.get("device_query_delay", 0.5))
     except Exception as e:
         logger.warning(
-            "Could not read device_query_delay from %s: %s", COLLECTOR_CONTROL_FILE, e
+            "Could not read collector control from %s: %s", COLLECTOR_CONTROL_FILE, e
         )
-    
-    #walk through each device reading power
-    for item in deviceIdList:
-        device_id = item['deviceId']
-        alias = item['alias']
-        
-        devPower = getDevPower(device_id, accessToken)
-        
-        # Skip devices that failed to respond
-        if devPower is None:
-            failed_devices.append(alias)
+
+    parallel_workers = _parse_parallel_workers(control)
+
+    if parallel_workers <= 1:
+        # Legacy sequential path (one HTTP at a time)
+        for item in deviceIdList:
+            device_id = item['deviceId']
+            alias = item['alias']
+            
+            devPower = getDevPower(device_id, accessToken)
+            
+            if devPower is None:
+                failed_devices.append(alias)
+                if device_query_delay > 0:
+                    time.sleep(device_query_delay)
+                continue
+            
+            current_GMT = time.gmtime()
+            timestamp = calendar.timegm(current_GMT)
+            
+            points_buffer.append({
+                'alias': alias,
+                'power_watts': float(devPower),
+                'time': timestamp
+            })
+            
             if device_query_delay > 0:
-                time.sleep(device_query_delay)  # Still delay to avoid hammering API on failures
-            continue
-        
-        current_GMT = time.gmtime()
-        timestamp = calendar.timegm(current_GMT)
-        
-        # Store data point for batch insert (only valid readings)
-        points_buffer.append({
-            'alias': alias,
-            'power_watts': float(devPower),
-            'time': timestamp
-        })
-        
-        # Rate limit: delay between device queries to avoid API throttling (429 errors)
-        if device_query_delay > 0:
-            time.sleep(device_query_delay)
+                time.sleep(device_query_delay)
+    else:
+        # Parallel: up to `parallel_workers` concurrent TP-Link calls per chunk; optional delay between chunks
+        chunks = list(_chunked(deviceIdList, parallel_workers))
+        for ci, chunk in enumerate(chunks):
+            with ThreadPoolExecutor(max_workers=len(chunk)) as pool:
+                futures = [
+                    pool.submit(_poll_one_device, item, accessToken) for item in chunk
+                ]
+                for fut in as_completed(futures):
+                    alias, devPower = fut.result()
+                    if devPower is None:
+                        failed_devices.append(alias)
+                        continue
+                    current_GMT = time.gmtime()
+                    timestamp = calendar.timegm(current_GMT)
+                    points_buffer.append({
+                        'alias': alias,
+                        'power_watts': float(devPower),
+                        'time': timestamp
+                    })
+            if device_query_delay > 0 and ci < len(chunks) - 1:
+                time.sleep(device_query_delay)
+        if parallel_workers > 1:
+            logger.info(
+                "Parallel device polling: up to %d workers per chunk, %d chunk(s), inter-chunk delay %ss",
+                parallel_workers,
+                len(chunks),
+                device_query_delay,
+            )
     
     # Log summary of polling results
     successful_count = len(points_buffer)

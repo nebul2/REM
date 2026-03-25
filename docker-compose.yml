@@ -41,6 +41,8 @@ services:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-change-me-in-production}
       # Collector settings
       - POLL_INTERVAL=${POLL_INTERVAL:-30}
+      # Optional: override parallel_workers from collector_control.json (1–32)
+      # - COLLECTOR_PARALLEL_WORKERS=8
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - CONF_FILE=/app/config/config.yaml
       - TOKEN_FILE=/app/data/refresh_token.txt
