@@ -5,6 +5,19 @@ All notable changes to the GOS REM system will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.3] - 2026-05-05
+
+### Added
+- **GitHub Container Registry publishing**: `docker-compose.yml` now declares `image:` for `collector` and `admin` alongside `build:`, so the same file builds-and-tags locally and pulls-and-runs from `ghcr.io/nebul2/rem-collector:latest` / `ghcr.io/nebul2/rem-admin:latest`. Build on a dev box (`docker compose build && push`), deploy on the host (`docker compose pull && up -d`).
+- **Collector `enabled` toggle is now honored at runtime**: when `collector_control.json` has `"enabled": false`, the collector logs `Collector disabled (...); skipping cycle` and sleeps for `poll_interval` without contacting TP-Link or writing to the DB. Previously the field was read but never checked — the admin-UI toggle was cosmetic.
+
+### Changed
+- **Collector default is now `enabled: false`**. A fresh deploy starts idle; an operator must flip the toggle in the admin UI to begin polling. Avoids accidentally hammering the TP-Link API on every redeploy. Existing `collector_control.json` files are unaffected.
+- **TimescaleDB pinned** to `timescale/timescaledb:2.25.2-pg16` (was `:latest-pg16`, a moving tag that silently bumped during routine pulls).
+
+### Fixed
+- **`gos_rem` was never a TimescaleDB hypertable** on the production DB — the init script's `create_hypertable` had silently failed on first DB init, and the table accumulated 6M+ rows as a plain Postgres table. All queries were full scans, which is why the admin healthcheck (`/api/devices`, a 24h `SELECT DISTINCT alias`) had been timing out for 5+ weeks. Fixed in production via `SELECT create_hypertable('gos_rem', 'time', migrate_data => TRUE);` (55s, 13 chunks); the init script remains correct for fresh deploys.
+
 ## [1.5.2] - 2026-03-25
 
 ### Added

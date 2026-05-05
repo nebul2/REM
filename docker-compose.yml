@@ -1,6 +1,6 @@
 services:
   timescaledb:
-    image: timescale/timescaledb:latest-pg16
+    image: timescale/timescaledb:2.25.2-pg16
     container_name: stats-timescaledb
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-gos_rem}
@@ -23,6 +23,7 @@ services:
       start_period: 30s
 
   collector:
+    image: ghcr.io/nebul2/rem-collector:latest
     build:
       context: ./app
       dockerfile: Dockerfile
@@ -69,6 +70,7 @@ services:
       start_period: 30s
 
   admin:
+    image: ghcr.io/nebul2/rem-admin:latest
     build:
       context: ./admin
       dockerfile: Dockerfile

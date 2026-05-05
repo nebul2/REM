@@ -544,6 +544,19 @@ TBD - To be determined with GOS team
 
 ## Release Notes
 
+### v1.5.3 (Container registry deploy + collector idle-by-default — 2026-05-05)
+
+**Added**
+- **ghcr.io publishing**: `docker-compose.yml` carries both `build:` and `image:` blocks for `collector` and `admin`. `docker compose build && push` from a dev box, `docker compose pull && up -d` on the host. Same file in both places. Images at `ghcr.io/nebul2/rem-collector` / `rem-admin` (public).
+- **`enabled` toggle is now real**. When `collector_control.json` says `"enabled": false`, the collector skips the cycle (no TP-Link call, no DB write). Previously the toggle was cosmetic — the admin UI showed it but the collector ignored it.
+
+**Changed**
+- **Collector defaults to disabled** on a fresh deploy. Operators must flip the admin-UI toggle to begin polling. Stops accidental TP-Link traffic on redeploys / new installs.
+- **TimescaleDB pinned** to `2.25.2-pg16` (was a moving `:latest-pg16` tag).
+
+**Fixed**
+- Production `gos_rem` was a plain table, not a hypertable — `create_hypertable` had silently failed at first init three months ago. Migrated in place (55s, 13 chunks); admin healthcheck has gone from "unhealthy for 5 weeks" to "healthy" without code change. Init script was already correct for fresh deploys.
+
 ### v1.5.2 (TP-Link adaptive backoff + UI — 2026-03-25)
 
 **Added**

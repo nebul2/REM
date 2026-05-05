@@ -169,8 +169,10 @@ class RateLimitError(RuntimeError):
 
 
 def _control_defaults() -> dict:
+    # Default to disabled: a fresh deploy should not hammer the TP-Link API
+    # until an operator explicitly turns the collector on via the admin UI.
     return {
-        "enabled": True,
+        "enabled": False,
         "poll_interval": 30,
         "device_query_delay": 0.5,
         "parallel_workers": 8,
@@ -868,6 +870,13 @@ def main():
                     logger.info("Adaptive backoff reset (operator requested via admin UI)")
 
                 last_eff = backoff.effective(control)
+
+                # Honor the admin-UI / collector_control.json `enabled` toggle —
+                # if disabled, sleep this cycle without touching TP-Link or the DB.
+                if not control.get("enabled", False):
+                    logger.info("Collector disabled (enabled=false in collector_control.json); skipping cycle")
+                    time.sleep(last_eff["poll_interval"])
+                    continue
 
                 # Check if database connection is still alive, reconnect if needed
                 try:
