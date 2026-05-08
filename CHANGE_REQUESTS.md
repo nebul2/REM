@@ -61,3 +61,53 @@ building speculatively.
 file `rem_background_polling_concept.md`) is the same shape from a different
 angle — Mid is what background polling becomes once it's defined relative to
 an active focus experiment.
+
+---
+
+## CR-002 — Auto-calibrated focus health thresholds
+
+**Status:** Deferred (captured 2026-05-08)
+
+**Problem:** Today's health pill thresholds are a fixed % of tick — green ≤30%,
+yellow 30–70%, orange 70–95%, red >95%. Robust and debuggable, but the same
+yardstick for every fleet shape. A focus experiment whose steady-state
+sits at 45% (e.g. 12 devices @ 10s tick) will always show yellow, even though
+the cadence is perfectly stable for *that* fleet+account combination. The
+operator can't distinguish "healthy stable yellow" from "drifting toward
+trouble yellow."
+
+**Direction:** When an experiment starts in Focus mode, run a short pre-flight
+benchmark over its devices using the existing `app/benchmark_poll_cycle.py`
+tool (~5 seconds wall time). Capture mean μ and standard deviation σ of round
+time. Calibrate thresholds to that fleet:
+
+```
+green   round_time < μ + 1σ                         (within normal jitter)
+yellow  μ + 1σ ≤ round_time < μ + 3σ                (slower than usual but recoverable)
+orange  round_time > μ + 3σ  OR  > 0.85 × tick      (anomalous + tick-pressure)
+red     round_time > 0.95 × tick                    (slip imminent)
+```
+
+This way the pill says "you're outside the established baseline" rather than
+"you're outside an arbitrary fixed-% bucket." Adapts naturally to fleets that
+run hot vs cool, accounts that respond fast vs slow.
+
+**Scope:** ~3–4 hours.
+- Pre-flight benchmark trigger on `start_experiment` when `focus_level=2` and
+  device_count ≥ 2 (skip for single-device experiments).
+- Store calibrated `{round_mean_s, round_std_s, calibrated_at}` on the
+  experiment record.
+- `_compute_health()` reads calibrated values when present; falls back to the
+  current fixed-% logic when not.
+- UI: indicate calibrated vs uncalibrated state on the health pill tooltip.
+
+**Why deferred:** the current fixed-% thresholds are working — operators can
+read "27% used, green" at a glance and the meaning is clear. Calibrated
+thresholds add steps (pre-flight wait, store/restore, recalibration on fleet
+changes) for a more nuanced signal that may or may not actually help. Worth
+shipping when an operator complains "the pill goes yellow when nothing's
+wrong" or "the pill stays green right up to the moment of slip."
+
+**Related:** depends on `app/benchmark_poll_cycle.py` (already exists — Dom's
+work). Touches `_compute_health()` in `app/collector.py` and the start-flow
+endpoint in `admin/app.py`.
