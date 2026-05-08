@@ -534,6 +534,18 @@ function setupEventListeners() {
         });
     }
 
+    const updateExperimentMaxDevicesBtn = document.getElementById('updateExperimentMaxDevices');
+    if (updateExperimentMaxDevicesBtn) {
+        updateExperimentMaxDevicesBtn.addEventListener('click', async () => {
+            const cap = parseInt(document.getElementById('experimentMaxDevices').value, 10);
+            if (!(cap >= 1 && cap <= 50)) {
+                alert('Focus mode device cap must be between 1 and 50');
+                return;
+            }
+            await updateExperimentMaxDevices(cap);
+        });
+    }
+
     const updateAdaptiveBackoffBtn = document.getElementById('updateAdaptiveBackoff');
     if (updateAdaptiveBackoffBtn) {
         updateAdaptiveBackoffBtn.addEventListener('click', async () => {
@@ -552,9 +564,13 @@ function setupEventListeners() {
     
     // Load collector status on page load
     loadCollectorStatus();
-    
+
     // Refresh collector status every 10 seconds
     setInterval(loadCollectorStatus, 10000);
+
+    // Surface admin-side errors in a dismissible banner
+    loadAdminErrors();
+    setInterval(loadAdminErrors, 15000);
     
     const refreshBtn = document.getElementById('refreshBtn');
     if (refreshBtn) {
@@ -3038,25 +3054,56 @@ async function loadCollectorStatus() {
             return;
         }
         const data = await response.json();
-        
+
         // Update UI
         const enabledCheckbox = document.getElementById('collectorEnabled');
         const statusText = document.getElementById('collectorStatusText');
         const runningStatus = document.getElementById('collectorRunningStatus');
         const currentPollInterval = document.getElementById('currentPollInterval');
         const pollIntervalInput = document.getElementById('pollInterval');
-        
+
         if (enabledCheckbox) {
             enabledCheckbox.checked = data.enabled || false;
         }
-        
-        if (statusText) {
-            statusText.textContent = data.running ? 'Running' : 'Stopped';
+
+        // Reflect both `enabled` (the toggle) and `running` (recent DB rows).
+        // The two used to be conflated, leading to confusing "Stopped" labels
+        // immediately after enabling (no data yet from the first cycle).
+        let label, color;
+        if (data.enabled && data.running) {
+            label = 'Polling';            color = '#27ae60'; // green
+        } else if (data.enabled && !data.running) {
+            label = 'Enabled · waiting for next cycle…';
+            color = '#f39c12'; // amber
+        } else if (!data.enabled && data.running) {
+            label = 'Disabled · last data still recent';
+            color = '#e67e22'; // orange
+        } else {
+            label = 'Stopped';            color = '#e74c3c'; // red
         }
-        
+
+        if (statusText) {
+            statusText.textContent = label;
+        }
         if (runningStatus) {
-            runningStatus.style.color = data.running ? '#27ae60' : '#e74c3c';
+            runningStatus.style.color = color;
             runningStatus.textContent = '●';
+        }
+
+        // Focus state — drives both the discreet chip (in the control panel)
+        // and the prominent top-of-page strip (in the operator's eye-line).
+        const focusLevel = (typeof data.focus_level === 'number') ? data.focus_level : 0;
+        const focus = (data.runtime && data.runtime.focus) || null;
+        renderFocusUi(focusLevel, focus);
+
+        // Focus mode device cap — populates the "Current: N" line and
+        // the input field in the control panel.
+        const cap = (typeof data.experiment_max_devices === 'number') ? data.experiment_max_devices : null;
+        const capDisplay = document.getElementById('currentExperimentMaxDevices');
+        const capInput = document.getElementById('experimentMaxDevices');
+        if (cap != null) {
+            if (capDisplay) capDisplay.textContent = cap;
+            if (capInput && document.activeElement !== capInput) capInput.value = cap;
         }
         
         if (currentPollInterval) {
@@ -3206,6 +3253,29 @@ async function updatePollInterval(interval) {
         alert('Error updating polling interval: ' + error.message);
     }
 }
+
+async function updateExperimentMaxDevices(cap) {
+    try {
+        const formData = new FormData();
+        formData.append('experiment_max_devices', cap);
+        const response = await fetch('/api/collector/control', { method: 'POST', body: formData });
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            alert(`Failed to update focus device cap: ${err.detail || response.statusText}`);
+            return;
+        }
+        await loadCollectorStatus();
+        const el = document.getElementById('currentExperimentMaxDevices');
+        if (el) {
+            el.textContent = cap;
+            el.style.color = '#27ae60';
+            setTimeout(() => { if (el) el.style.color = ''; }, 2000);
+        }
+    } catch (error) {
+        alert(`Error: ${error.message}`);
+    }
+}
+
 
 async function updateParallelWorkers(workers) {
     try {
@@ -3461,12 +3531,12 @@ async function updateExperimentStartTime(experimentId, startTime) {
     try {
         const formData = new FormData();
         formData.append('start_time', startTime);
-        
+
         const response = await fetch(`/api/experiments/${experimentId}`, {
             method: 'PUT',
             body: formData
         });
-        
+
         if (response.ok) {
             console.log(`Auto-set start time for experiment ${experimentId} to ${startTime}`);
         } else {
@@ -3476,3 +3546,242 @@ async function updateExperimentStartTime(experimentId, startTime) {
         console.error('Error updating experiment start time:', error);
     }
 }
+
+// ----------------------------------------------------------------------------
+// Admin error banner — surfaces operator-visible admin-side problems
+// (collector control writes that failed, etc.) so they don't only end up in
+// container logs.
+// ----------------------------------------------------------------------------
+
+async function loadAdminErrors() {
+    try {
+        const response = await fetch('/api/admin/errors');
+        if (!response.ok) return;
+        const data = await response.json();
+        const errors = data.errors || [];
+        const banner = document.getElementById('adminErrorBanner');
+        const list = document.getElementById('adminErrorList');
+        if (!banner || !list) return;
+
+        if (errors.length === 0) {
+            banner.style.display = 'none';
+            list.innerHTML = '';
+            return;
+        }
+
+        // Render most-recent first
+        const items = errors.slice().reverse().map(err => {
+            const when = err.at ? new Date(err.at).toLocaleString() : '';
+            const source = err.source ? `<span class="admin-error-source">[${escapeAdminError(err.source)}]</span>` : '';
+            return `<li><span class="admin-error-when">${escapeAdminError(when)}</span> ${source} ${escapeAdminError(err.message || '')}</li>`;
+        });
+        list.innerHTML = items.join('');
+        banner.style.display = '';
+    } catch (e) {
+        console.error('loadAdminErrors failed:', e);
+    }
+}
+
+async function dismissAdminErrors() {
+    try {
+        const response = await fetch('/api/admin/errors/clear', { method: 'POST' });
+        if (response.ok) {
+            const banner = document.getElementById('adminErrorBanner');
+            if (banner) banner.style.display = 'none';
+        }
+    } catch (e) {
+        console.error('dismissAdminErrors failed:', e);
+    }
+}
+
+function escapeAdminError(s) {
+    if (s == null) return '';
+    return String(s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+window.dismissAdminErrors = dismissAdminErrors;
+
+// ----------------------------------------------------------------------------
+// Focus state UI — top-of-page strip + (mirror) control-panel chip + toggle
+// ----------------------------------------------------------------------------
+
+function renderFocusUi(focusLevel, focusTelem) {
+    // ---- Top strip (always visible when focus_level > 0; hidden when Off)
+    const strip = document.getElementById('focusStrip');
+    const stripTag = document.getElementById('focusStripTag');
+    const stripDetail = document.getElementById('focusStripDetail');
+    const stripPill = document.getElementById('focusStripPill');
+
+    // ---- Toggle button states (always render — visible regardless of activity)
+    updateFocusToggle(focusLevel);
+
+    // ---- Discreet chip (next to collector status — same data, secondary surface)
+    const chip = document.getElementById('focusChip');
+    const chipDetail = document.getElementById('focusChipDetail');
+    const chipPill = document.getElementById('focusChipPill');
+
+    if (focusLevel === 0) {
+        // Off — keep the strip visible (so the operator can turn it on),
+        // but in a quieter style and without the live telemetry block.
+        if (strip) {
+            strip.classList.add('focus-strip-off');
+            stripTag.textContent = 'FOCUS OFF';
+            stripDetail.textContent = 'All active devices polled at the same ambient cadence';
+            stripPill.className = 'health-pill health-unknown';
+            stripPill.textContent = '';
+            stripPill.style.display = 'none';
+            strip.style.display = '';
+        }
+        if (chip) chip.style.display = 'none';
+        return;
+    }
+
+    // Strong focus engaged — render both surfaces
+    if (strip) {
+        strip.classList.remove('focus-strip-off');
+        stripPill.style.display = '';
+    }
+    const active = !!(focusTelem && focusTelem.active);
+    let detailText, healthClass, healthLabel;
+    if (active) {
+        const tick = focusTelem.target_cadence_s || '?';
+        const util = focusTelem.tick_utilization_pct != null ? Math.round(focusTelem.tick_utilization_pct) : null;
+        const dev = focusTelem.device_count != null ? focusTelem.device_count : '?';
+        detailText = util != null
+            ? `${dev} dev · ${tick}s tick · ${util}% used · last round ${focusTelem.last_round_s != null ? focusTelem.last_round_s.toFixed(2) : '?'}s`
+            : `${dev} dev · ${tick}s tick`;
+        healthClass = `health-${focusTelem.health || 'unknown'}`;
+        healthLabel = `● ${(focusTelem.health || 'unknown').toUpperCase()}`;
+    } else {
+        // Strong is on but no experiment running, or we haven't completed a focus cycle yet
+        detailText = 'Strong focus on — start an experiment to begin';
+        healthClass = 'health-unknown';
+        healthLabel = '● —';
+    }
+
+    // Render strip
+    if (strip && stripTag && stripDetail && stripPill) {
+        stripTag.textContent = 'FOCUS ON';
+        stripDetail.textContent = detailText;
+        stripPill.className = `health-pill ${healthClass}`;
+        stripPill.textContent = healthLabel;
+        strip.style.display = '';
+    }
+
+    // Render chip (more compact)
+    if (chip && chipDetail && chipPill) {
+        chipDetail.textContent = ` · ${detailText}`;
+        chipPill.className = `health-pill ${healthClass}`;
+        chipPill.textContent = healthLabel;
+        chip.style.display = '';
+    }
+}
+
+function updateFocusToggle(focusLevel) {
+    const btn = document.getElementById('focusToggleBtn');
+    if (!btn) return;
+    if (focusLevel === 0) {
+        btn.textContent = 'Turn focus on';
+        btn.dataset.targetLevel = '2';
+        btn.classList.remove('btn-danger');
+        btn.classList.add('btn-primary');
+    } else {
+        btn.textContent = 'Turn focus off';
+        btn.dataset.targetLevel = '0';
+        btn.classList.remove('btn-primary');
+        btn.classList.add('btn-danger');
+    }
+}
+
+async function toggleFocus() {
+    const btn = document.getElementById('focusToggleBtn');
+    if (!btn) return;
+    const target = parseInt(btn.dataset.targetLevel || '2', 10);
+    await setFocusLevel(target);
+}
+
+async function setFocusLevel(level) {
+    try {
+        const formData = new FormData();
+        formData.append('focus_level', String(level));
+        const r = await fetch('/api/collector/control', { method: 'POST', body: formData });
+        if (!r.ok) {
+            const err = await r.json().catch(() => ({}));
+            alert(`Could not change focus level: ${err.detail || r.statusText}`);
+            return;
+        }
+        // Refresh status immediately so the strip reflects the new level
+        loadCollectorStatus();
+    } catch (e) {
+        alert(`Error: ${e.message}`);
+    }
+}
+
+window.setFocusLevel = setFocusLevel;
+window.toggleFocus = toggleFocus;
+
+// ----------------------------------------------------------------------------
+// "Hide offline" — declutter a chart by hiding any line whose device is
+// currently offline or missing in the registry. The operator can re-show
+// individual lines via the chart legend (single-click = show only / shift =
+// toggle), or reload the chart to undo en masse.
+// ----------------------------------------------------------------------------
+
+async function hideOfflineDevicesInChart(chartId) {
+    const chart = (chartId === 'A' ? chartA : chartB);
+    if (!chart || !chart.data || !Array.isArray(chart.data.datasets) || chart.data.datasets.length === 0) {
+        alert(`Chart ${chartId} has no data loaded yet.`);
+        return;
+    }
+
+    let offlineSet;
+    try {
+        const response = await fetch('/api/devices/registry');
+        if (!response.ok) {
+            alert('Could not load device registry — refresh the Fleet on the Groups page first.');
+            return;
+        }
+        const view = await response.json();
+        // Status `offline` (cloud says unreachable) and `missing` (not in latest API response)
+        // are both "not currently active" → hide both.
+        offlineSet = new Set(
+            (view.active || [])
+                .filter(d => d.status === 'offline' || d.status === 'missing')
+                .map(d => d.alias)
+        );
+    } catch (e) {
+        alert(`Could not load device registry: ${e.message}`);
+        return;
+    }
+
+    if (offlineSet.size === 0) {
+        alert('No active devices are currently offline. Refresh the Fleet on the Groups page if you expected some to be flagged.');
+        return;
+    }
+
+    // Hide any dataset whose label matches an offline alias. Statistical overlays
+    // (Mean/Median/Total/Average/Annotations) and unmatched lines are left alone.
+    const STAT_OVERLAYS = ['Mean', 'Median', 'Total', 'Average', 'Annotations'];
+    let hiddenCount = 0;
+    chart.data.datasets.forEach((ds, idx) => {
+        const label = ds.label || '';
+        const isStat = STAT_OVERLAYS.some(s => label.includes(s) || label.startsWith(s + ':'));
+        if (isStat) return;
+        if (offlineSet.has(label)) {
+            const meta = chart.getDatasetMeta(idx);
+            meta.hidden = true;
+            hiddenCount++;
+        }
+    });
+
+    chart.update();
+    if (typeof updateChartScrollbar === 'function') updateChartScrollbar(chartId);
+
+    if (hiddenCount === 0) {
+        alert('No offline devices are currently shown on this chart.');
+    }
+}
+
+window.hideOfflineDevicesInChart = hideOfflineDevicesInChart;

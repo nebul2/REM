@@ -179,16 +179,92 @@ window.onclick = function(event) {
     }
 }
 
-// Set up event listeners for edit/delete buttons using data attributes
+// ----------------------------------------------------------------------------
+// Fleet (device registry) handlers
+// ----------------------------------------------------------------------------
+
+window.refreshFleet = async function () {
+    const btn = document.getElementById('refreshFleetBtn');
+    const summary = document.getElementById('fleetSummary');
+    if (!btn) return;
+    const originalLabel = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Refreshing…';
+    if (summary) summary.classList.add('refreshing');
+
+    try {
+        const response = await fetch('/api/devices/refresh-fleet', { method: 'POST' });
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            alert(`Refresh failed: ${err.detail || response.statusText}`);
+            return;
+        }
+        // Reload — server-rendered registry is the source of truth for the page
+        window.location.reload();
+    } catch (e) {
+        alert(`Refresh error: ${e.message}`);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = originalLabel;
+        if (summary) summary.classList.remove('refreshing');
+    }
+};
+
+async function setLifecycle(alias, action) {
+    const url = `/api/devices/${encodeURIComponent(alias)}/${action}`;
+    try {
+        const response = await fetch(url, { method: 'POST' });
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            alert(`Failed to ${action} ${alias}: ${err.detail || response.statusText}`);
+            return;
+        }
+        window.location.reload();
+    } catch (e) {
+        alert(`Error: ${e.message}`);
+    }
+}
+
+// ----------------------------------------------------------------------------
+// Relative time rendering — turn ISO8601 timestamps into "3 min ago"
+// ----------------------------------------------------------------------------
+
+function relativeTime(iso) {
+    if (!iso) return '';
+    const then = new Date(iso);
+    if (isNaN(then.getTime())) return iso;
+    const diffSec = Math.floor((Date.now() - then.getTime()) / 1000);
+    if (diffSec < 5) return 'just now';
+    if (diffSec < 60) return `${diffSec}s ago`;
+    if (diffSec < 3600) return `${Math.floor(diffSec / 60)} min ago`;
+    if (diffSec < 86400) return `${Math.floor(diffSec / 3600)} h ago`;
+    return `${Math.floor(diffSec / 86400)} d ago`;
+}
+
+function renderRelativeTimes() {
+    document.querySelectorAll('[data-rel-time]').forEach(el => {
+        const iso = el.getAttribute('data-rel-time');
+        el.textContent = relativeTime(iso);
+        el.title = iso;
+    });
+}
+
+// ----------------------------------------------------------------------------
+// Set up event listeners for edit/delete + lifecycle buttons
+// ----------------------------------------------------------------------------
+
 document.addEventListener('DOMContentLoaded', () => {
+    renderRelativeTimes();
+
     // Handle click events on buttons with data-action attribute using event delegation
     document.addEventListener('click', (event) => {
         const btn = event.target.closest('[data-action]');
         if (!btn) return;
-        
+
         const action = btn.getAttribute('data-action');
         const groupName = btn.getAttribute('data-group');
-        
+        const alias = btn.getAttribute('data-alias');
+
         if (action === 'edit' && groupName) {
             event.preventDefault();
             event.stopPropagation();
@@ -197,6 +273,22 @@ document.addEventListener('DOMContentLoaded', () => {
             event.preventDefault();
             event.stopPropagation();
             deleteGroup(groupName);
+        } else if (action === 'exclude' && alias) {
+            event.preventDefault();
+            event.stopPropagation();
+            if (confirm(`Exclude ${alias}? Collector will stop polling it. You can reactivate later.`)) {
+                setLifecycle(alias, 'exclude');
+            }
+        } else if (action === 'archive' && alias) {
+            event.preventDefault();
+            event.stopPropagation();
+            if (confirm(`Archive ${alias}? Marks it retired; historical data is preserved.`)) {
+                setLifecycle(alias, 'archive');
+            }
+        } else if (action === 'reactivate' && alias) {
+            event.preventDefault();
+            event.stopPropagation();
+            setLifecycle(alias, 'reactivate');
         }
     });
 });

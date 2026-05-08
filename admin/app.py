@@ -25,6 +25,8 @@ import zipfile
 from io import BytesIO, StringIO
 import csv
 import secrets
+import time as _time
+import device_registry
 
 app = FastAPI(title="GOS REM Data Exploration Tool", root_path="")
 
@@ -121,6 +123,11 @@ SNAPSHOTS_DIR = DATA_DIR / "snapshots"
 COLLECTOR_CONTROL_FILE = DATA_DIR / "collector_control.json"
 COLLECTOR_STATUS_FILE = DATA_DIR / "collector_status.json"
 COLLECTOR_RESET_BACKOFF_FILE = DATA_DIR / "reset_backoff"
+DEVICE_REGISTRY_FILE = DATA_DIR / "device_registry.json"
+REFRESH_FLEET_REQUEST_FILE = DATA_DIR / "refresh_fleet_request.json"
+REFRESH_FLEET_RESULT_FILE = DATA_DIR / "refresh_fleet_result.json"
+ADMIN_ERRORS_FILE = DATA_DIR / "admin_errors.json"
+ADMIN_ERRORS_MAX = 25  # keep most recent N; older are dropped
 
 # Ensure directories exist
 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -799,24 +806,22 @@ async def exploration(request: Request):
 
 @app.get("/manage", response_class=HTMLResponse)
 async def manage_groups(request: Request):
-    """Group management page"""
+    """Group management page — renders the device registry (the Fleet)."""
     groups = load_groups()
-    try:
-        devices = get_available_devices()
-    except Exception:
-        devices = []
-    
+    registry = device_registry.load_registry(DEVICE_REGISTRY_FILE)
+    fleet = device_registry.view_for_template(registry)
+
     # Get base URL from request for navigation links (works behind proxy)
     scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
     host = request.headers.get("x-forwarded-host", request.headers.get("host", "localhost:7001"))
     base_url = f"{scheme}://{host}"
-    
+
     response = templates.TemplateResponse(
         request,
         "index.html",
         {
             "groups": groups,
-            "devices": devices,
+            "fleet": fleet,
             "css_content": load_all_css(),
             "logo_data_uri": get_logo_data_uri(),
             "script_js": load_js_file("script.js"),
@@ -914,8 +919,20 @@ async def gallery(request: Request):
 
 @app.get("/api/devices")
 async def get_devices():
-    """Get available devices"""
+    """
+    Active (non-excluded, non-archived) device aliases for use in pickers
+    elsewhere in the app. Reads from the registry; falls back to DB-distinct
+    aliases if the registry is empty (e.g. on first run before any refresh).
+    """
     try:
+        registry = device_registry.load_registry(DEVICE_REGISTRY_FILE)
+        active_aliases = sorted(
+            alias for alias, dev in registry.get('devices', {}).items()
+            if dev.get('lifecycle') == device_registry.LIFECYCLE_ACTIVE
+        )
+        if active_aliases:
+            return JSONResponse(content={"devices": active_aliases})
+        # Bootstrap fallback: registry not yet populated
         devices = get_available_devices()
         return JSONResponse(content={"devices": devices})
     except HTTPException:
@@ -923,6 +940,168 @@ async def get_devices():
     except Exception as e:
         print(f"Error in /api/devices endpoint: {e}")
         return JSONResponse(content={"devices": []}, status_code=200)
+
+
+# ---------------------------------------------------------------------------
+# Device registry endpoints — the Fleet on /manage.
+#
+# Refresh-Fleet uses shape (b): admin writes a request file; the collector
+# picks it up at the top of its poll cycle, calls TP-Link `getDeviceList`,
+# and writes the result. We poll for the matching result with a timeout
+# slightly larger than the default poll interval.
+# ---------------------------------------------------------------------------
+
+REFRESH_TIMEOUT_S = 35
+REFRESH_POLL_INTERVAL_S = 0.5
+
+
+@app.get("/api/devices/registry")
+async def get_device_registry():
+    """Return the full registry view used by /manage."""
+    registry = device_registry.load_registry(DEVICE_REGISTRY_FILE)
+    return JSONResponse(content=device_registry.view_for_template(registry))
+
+
+@app.post("/api/devices/refresh-fleet")
+async def refresh_fleet():
+    """
+    Ask the collector to fetch a fresh device list from TP-Link, merge the
+    result into the registry, and return the updated view.
+    """
+    # Clear any stale leftovers before starting (best-effort)
+    device_registry.clear_request_and_result(REFRESH_FLEET_REQUEST_FILE, REFRESH_FLEET_RESULT_FILE)
+
+    request_id = device_registry.write_refresh_request(REFRESH_FLEET_REQUEST_FILE)
+
+    deadline = _time.monotonic() + REFRESH_TIMEOUT_S
+    result = None
+    while _time.monotonic() < deadline:
+        result = device_registry.read_refresh_result(REFRESH_FLEET_RESULT_FILE, request_id)
+        if result is not None:
+            break
+        _time.sleep(REFRESH_POLL_INTERVAL_S)
+
+    if result is None:
+        # Don't leave a stale request lying around
+        device_registry.clear_request_and_result(REFRESH_FLEET_REQUEST_FILE, REFRESH_FLEET_RESULT_FILE)
+        raise HTTPException(
+            status_code=504,
+            detail=(
+                f"Collector did not respond within {REFRESH_TIMEOUT_S}s. "
+                "Check that the collector container is running and not in adaptive backoff."
+            ),
+        )
+
+    if not result.get("ok"):
+        device_registry.clear_request_and_result(REFRESH_FLEET_REQUEST_FILE, REFRESH_FLEET_RESULT_FILE)
+        raise HTTPException(
+            status_code=502,
+            detail=f"TP-Link refresh failed: {result.get('error') or 'unknown error'}",
+        )
+
+    api_devices = result.get("devices", [])
+    registry = device_registry.load_registry(DEVICE_REGISTRY_FILE)
+    registry, summary = device_registry.merge_api_response(registry, api_devices)
+    device_registry.save_registry(DEVICE_REGISTRY_FILE, registry)
+    device_registry.clear_request_and_result(REFRESH_FLEET_REQUEST_FILE, REFRESH_FLEET_RESULT_FILE)
+
+    return JSONResponse(content={
+        "ok": True,
+        "summary": summary,
+        "fleet": device_registry.view_for_template(registry),
+    })
+
+
+def _set_lifecycle_endpoint(alias: str, lifecycle: str, reason: Optional[str] = None):
+    registry = device_registry.load_registry(DEVICE_REGISTRY_FILE)
+    try:
+        device_registry.set_lifecycle(registry, alias, lifecycle, reason=reason)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    device_registry.save_registry(DEVICE_REGISTRY_FILE, registry)
+    return JSONResponse(content={
+        "ok": True,
+        "fleet": device_registry.view_for_template(registry),
+    })
+
+
+@app.post("/api/devices/{alias}/exclude")
+async def exclude_device(alias: str, reason: Optional[str] = Form(None)):
+    """Mark a device excluded — collector stops polling it; UI hides it from pickers."""
+    return _set_lifecycle_endpoint(alias, device_registry.LIFECYCLE_EXCLUDED, reason)
+
+
+@app.post("/api/devices/{alias}/archive")
+async def archive_device(alias: str, reason: Optional[str] = Form(None)):
+    """Mark a device archived (e.g. retired). Collector skips it; historical data preserved."""
+    return _set_lifecycle_endpoint(alias, device_registry.LIFECYCLE_ARCHIVED, reason)
+
+
+@app.post("/api/devices/{alias}/reactivate")
+async def reactivate_device(alias: str):
+    """Move a device back to active lifecycle — collector resumes polling."""
+    return _set_lifecycle_endpoint(alias, device_registry.LIFECYCLE_ACTIVE, None)
+
+
+# ---------------------------------------------------------------------------
+# Admin error log — surfaces operator-visible problems (failed control writes,
+# refresh-fleet failures, etc.) on /exploration so they don't only end up in
+# container logs. Operator clicks Dismiss to clear once acknowledged.
+# ---------------------------------------------------------------------------
+
+def _record_admin_error(source: str, message: str, severity: str = "error") -> None:
+    """Append an error to the admin error log, oldest-first FIFO trim to MAX."""
+    try:
+        entries = []
+        if ADMIN_ERRORS_FILE.exists():
+            try:
+                with open(ADMIN_ERRORS_FILE, 'r') as f:
+                    raw = json.load(f)
+                if isinstance(raw, list):
+                    entries = raw
+            except Exception:
+                pass
+        entries.append({
+            "id": str(uuid.uuid4()),
+            "at": datetime.now(timezone.utc).isoformat(timespec='seconds').replace('+00:00', 'Z'),
+            "source": source,
+            "severity": severity,
+            "message": message,
+        })
+        # Keep most recent N
+        entries = entries[-ADMIN_ERRORS_MAX:]
+        ADMIN_ERRORS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with open(ADMIN_ERRORS_FILE, 'w') as f:
+            json.dump(entries, f, indent=2)
+    except Exception as e:
+        # Last-resort: print, but never raise from the error logger itself
+        print(f"Could not record admin error: {e}")
+
+
+@app.get("/api/admin/errors")
+async def get_admin_errors():
+    """Return any admin-side errors that haven't been dismissed yet."""
+    if not ADMIN_ERRORS_FILE.exists():
+        return JSONResponse(content={"errors": []})
+    try:
+        with open(ADMIN_ERRORS_FILE, 'r') as f:
+            data = json.load(f)
+        if not isinstance(data, list):
+            data = []
+    except Exception:
+        data = []
+    return JSONResponse(content={"errors": data})
+
+
+@app.post("/api/admin/errors/clear")
+async def clear_admin_errors():
+    """Operator dismissal — wipe the admin error log."""
+    try:
+        if ADMIN_ERRORS_FILE.exists():
+            ADMIN_ERRORS_FILE.unlink()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Could not clear errors: {e}")
+    return JSONResponse(content={"ok": True})
 
 
 @app.get("/api/groups")
@@ -1013,7 +1192,10 @@ async def create_experiment(
     start_time: Optional[str] = Form(None),
     end_time: Optional[str] = Form(None),
     is_current: Optional[str] = Form(None),  # "true" if current experiment
-    linked_groups: Optional[str] = Form(None)  # Comma-separated group names
+    linked_groups: Optional[str] = Form(None),  # Comma-separated group names
+    target_cadence_s: Optional[int] = Form(None),  # preferred cadence when system focus is on
+    # focus_mode kept as accepted-but-ignored for backward compat with old clients
+    focus_mode: Optional[str] = Form(None),
 ):
     """Create a new experiment with time range and linked groups"""
     experiments = load_experiments()
@@ -1053,6 +1235,10 @@ async def create_experiment(
     
     experiment_id = name.lower().replace(' ', '-').replace('_', '-')
     
+    tick = int(target_cadence_s) if target_cadence_s else 10
+    if tick < 5 or tick > 300:
+        raise HTTPException(status_code=400, detail="target_cadence_s must be between 5 and 300 seconds")
+
     experiments[experiment_id] = {
         "id": experiment_id,
         "name": name,
@@ -1063,6 +1249,7 @@ async def create_experiment(
         },
         "is_current": is_current_flag,
         "linked_groups": group_list,
+        "target_cadence_s": tick,
         "created_at": datetime.now().isoformat(),
         "updated_at": datetime.now().isoformat()
     }
@@ -1080,7 +1267,10 @@ async def update_experiment(
     start_time: Optional[str] = Form(None),
     end_time: Optional[str] = Form(None),
     linked_groups: Optional[str] = Form(None),
-    is_current: Optional[bool] = Form(None)
+    is_current: Optional[bool] = Form(None),
+    target_cadence_s: Optional[int] = Form(None),
+    # focus_mode kept for backward compat — silently ignored
+    focus_mode: Optional[bool] = Form(None),
 ):
     """Update an existing experiment"""
     experiments = load_experiments()
@@ -1096,23 +1286,17 @@ async def update_experiment(
     if description is not None:
         experiment["description"] = description
     
-    # Update time range if provided
+    # Update time range if provided. Lifecycle (is_current) is NOT touched here —
+    # that's the exclusive responsibility of the /start and /end endpoints.
     if start_time is not None or end_time is not None:
         if experiment.get("time_range") is None:
             experiment["time_range"] = {}
         if start_time is not None:
             experiment["time_range"]["start"] = start_time or None
         if end_time is not None:
-            # If end_time is empty string, clear it (for reactivating current experiments)
-            if end_time == '':
-                experiment["time_range"]["end"] = None
-                experiment["is_current"] = True
-            else:
-                experiment["time_range"]["end"] = end_time
-                # If end_time is set, unset is_current
-                if end_time:
-                    experiment["is_current"] = False
-        
+            # Empty string explicitly clears the end time (no lifecycle side-effect)
+            experiment["time_range"]["end"] = end_time or None
+
         # Validate time range
         if experiment["time_range"].get("start") and experiment["time_range"].get("end"):
             try:
@@ -1125,6 +1309,9 @@ async def update_experiment(
     
     # Handle is_current flag explicitly if provided
     if is_current is not None:
+        # Enforce single-running invariant: if becoming current, end any others first
+        if is_current and not experiment.get("is_current"):
+            _auto_end_other_currents(experiments, except_id=experiment_id)
         experiment["is_current"] = is_current
         # If setting as current, ensure end_time is cleared
         if is_current:
@@ -1135,15 +1322,21 @@ async def update_experiment(
     # Update linked groups if provided
     if linked_groups is not None:
         group_list = [g.strip() for g in linked_groups.split(',') if g.strip()] if linked_groups else []
-        
+
         # Validate groups exist
         groups = load_groups()
         for group_name in group_list:
             if group_name not in groups:
                 raise HTTPException(status_code=400, detail=f"Group '{group_name}' does not exist")
-        
+
         experiment["linked_groups"] = group_list
-    
+
+    if target_cadence_s is not None:
+        if target_cadence_s < 5 or target_cadence_s > 300:
+            raise HTTPException(status_code=400, detail="target_cadence_s must be between 5 and 300 seconds")
+        experiment["target_cadence_s"] = int(target_cadence_s)
+    # focus_mode silently ignored — system-wide focus_level supersedes
+
     experiment["updated_at"] = datetime.now().isoformat()
     
     save_experiments(experiments)
@@ -1165,27 +1358,119 @@ async def delete_experiment(experiment_id: str):
     return JSONResponse(content={"success": True})
 
 
+def _auto_end_other_currents(experiments: dict, except_id: str) -> list:
+    """
+    Enforce the single-currentness invariant: any other experiment with
+    is_current=True is stopped (end_time=now, is_current=False) before we
+    start the requested one. Returns the list of experiment IDs that were
+    auto-ended (for the response payload — UI may want to surface this).
+    """
+    auto_ended = []
+    now_iso = datetime.now().isoformat()
+    for other_id, other in experiments.items():
+        if other_id == except_id:
+            continue
+        if other.get("is_current"):
+            other["is_current"] = False
+            other["time_range"] = other.get("time_range", {}) or {}
+            if not other["time_range"].get("end"):
+                other["time_range"]["end"] = now_iso
+            other["updated_at"] = now_iso
+            auto_ended.append(other_id)
+    return auto_ended
+
+
+def _resolve_experiment_device_count(experiment: dict) -> int:
+    """Count distinct device aliases across the experiment's linked_groups."""
+    groups = load_groups()
+    aliases = set()
+    for group_name in (experiment.get("linked_groups") or []):
+        g = groups.get(group_name) or {}
+        for alias in (g.get("devices") or []):
+            if alias:
+                aliases.add(alias)
+    return len(aliases)
+
+
+def _read_collector_control_for_caps() -> dict:
+    """Best-effort read of collector_control.json for cap settings."""
+    try:
+        if COLLECTOR_CONTROL_FILE.exists():
+            with open(COLLECTOR_CONTROL_FILE, 'r') as f:
+                raw = json.load(f)
+                if isinstance(raw, dict):
+                    return raw
+    except Exception:
+        pass
+    return {}
+
+
 @app.post("/api/experiments/{experiment_id}/start")
 async def start_experiment(experiment_id: str):
-    """Mark an experiment as current and set start time"""
+    """
+    Start an experiment. Sets is_current=True; if no start time is set, uses now.
+    If the experiment is restarting from Completed (has both start+end), clears the
+    end time and stamps a fresh start_time of now.
+    Enforces the single-running invariant: any other current experiment is auto-ended.
+
+    If focus_mode is true, validates the device count is ≤ experiment_max_devices
+    (default 12; configurable in collector_control.json).
+    """
     experiments = load_experiments()
-    
+
     if experiment_id not in experiments:
         raise HTTPException(status_code=404, detail=f"Experiment '{experiment_id}' not found")
-    
+
     experiment = experiments[experiment_id]
-    
-    # Set as current and update start time to now if not set
+
+    # Cap validation when system focus_level=2 (Strong) is active. Focus is now
+    # a system-wide setting, not per-experiment — but we still want to refuse
+    # starting an experiment that's too large for the active focus mode.
+    control = _read_collector_control_for_caps()
+    if int(control.get("focus_level", 0) or 0) == 2:
+        cap = int(control.get("experiment_max_devices", 12))
+        device_count = _resolve_experiment_device_count(experiment)
+        if device_count > cap:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Strong focus is currently on — supports up to {cap} devices; "
+                    f"this experiment links {device_count}. Either reduce linked groups, "
+                    f"raise experiment_max_devices in collector_control.json, "
+                    f"or turn focus Off from /exploration before starting."
+                ),
+            )
+        if device_count == 0:
+            raise HTTPException(
+                status_code=400,
+                detail="Strong focus is on but the experiment has no linked devices.",
+            )
+
+    now_iso = datetime.now().isoformat()
+
+    # Auto-end any other currently-running experiments first
+    auto_ended = _auto_end_other_currents(experiments, except_id=experiment_id)
+
+    # Restart-from-completed: if both start and end are set, treat this as a fresh run
+    tr = experiment.get("time_range") or {}
+    if tr.get("start") and tr.get("end"):
+        experiment["time_range"] = {"start": now_iso, "end": None}
+    else:
+        experiment["time_range"] = experiment.get("time_range", {}) or {}
+        if not experiment["time_range"].get("start"):
+            experiment["time_range"]["start"] = now_iso
+        experiment["time_range"]["end"] = None  # ensure it's clear
+
     experiment["is_current"] = True
-    if not experiment.get("time_range", {}).get("start"):
-        experiment["time_range"] = experiment.get("time_range", {})
-        experiment["time_range"]["start"] = datetime.now().isoformat()
-    
-    experiment["updated_at"] = datetime.now().isoformat()
-    
+    experiment["updated_at"] = now_iso
+
     save_experiments(experiments)
-    
-    return JSONResponse(content={"success": True, "experiment": experiment})
+
+    return JSONResponse(content={
+        "success": True,
+        "experiment": experiment,
+        "auto_ended": auto_ended,
+    })
 
 
 @app.post("/api/experiments/{experiment_id}/end")
@@ -1767,6 +2052,8 @@ async def get_collector_status():
         "device_query_delay": control.get("device_query_delay", 0.5),
         "parallel_workers": control.get("parallel_workers", 8),
         "adaptive_backoff": control.get("adaptive_backoff", True),
+        "focus_level": int(control.get("focus_level", 0) or 0),
+        "experiment_max_devices": int(control.get("experiment_max_devices", 12) or 12),
         "running": running,
         "tp_link_health": runtime.get("health", "unknown"),
         "effective_poll_interval": eff.get("poll_interval"),
@@ -1788,6 +2075,8 @@ async def control_collector(
     parallel_workers: Optional[int] = Form(None),
     adaptive_backoff: Optional[str] = Form(None),
     reset_backoff: Optional[str] = Form(None),
+    focus_level: Optional[int] = Form(None),  # 0=Off, 2=Strong (1 reserved for Mid — CR-001)
+    experiment_max_devices: Optional[int] = Form(None),  # cap for Strong focus mode
 ):
     """Control collector settings. reset_backoff touches a file the collector reads (no container restart)."""
     control = _default_collector_control()
@@ -1830,6 +2119,42 @@ async def control_collector(
             raise HTTPException(status_code=400, detail="Parallel workers must be between 1 and 32 (1 = sequential)")
         control["parallel_workers"] = parallel_workers
         control_dirty = True
+    if experiment_max_devices is not None:
+        if experiment_max_devices < 1 or experiment_max_devices > 50:
+            raise HTTPException(
+                status_code=400,
+                detail="experiment_max_devices must be between 1 and 50.",
+            )
+        control["experiment_max_devices"] = int(experiment_max_devices)
+        control_dirty = True
+
+    if focus_level is not None:
+        if focus_level not in (0, 2):
+            # Level 1 (Mid) is reserved for CR-001 — reject for now so the UI
+            # can't accidentally set a value the collector treats as Off.
+            raise HTTPException(
+                status_code=400,
+                detail="focus_level must be 0 (Off) or 2 (Strong). Mid (1) is captured as CR-001 — not yet implemented.",
+            )
+        # If turning Strong on, validate the running experiment fits the cap.
+        if focus_level == 2:
+            experiments = load_experiments()
+            running = [(eid, e) for eid, e in experiments.items() if e.get("is_current")]
+            if running:
+                _, exp = running[0]
+                cap = int(control.get("experiment_max_devices", 12))
+                device_count = _resolve_experiment_device_count(exp)
+                if device_count > cap:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            f"Cannot enable Strong focus — running experiment links {device_count} devices, "
+                            f"cap is {cap}. Either reduce linked groups, raise experiment_max_devices in "
+                            f"collector_control.json, or stop the experiment first."
+                        ),
+                    )
+        control["focus_level"] = int(focus_level)
+        control_dirty = True
 
     if control_dirty:
         try:
@@ -1837,23 +2162,17 @@ async def control_collector(
             with open(COLLECTOR_CONTROL_FILE, 'w') as f:
                 json.dump(control, f, indent=2)
         except Exception as e:
-            print(f"Error saving collector control: {e}")
+            _record_admin_error(
+                source="collector_control",
+                message=f"Failed to save collector settings: {e}",
+            )
             raise HTTPException(status_code=500, detail="Failed to save collector settings")
 
-    restart_needed = any(
-        x is not None
-        for x in (enabled, poll_interval, device_query_delay, parallel_workers)
-    )
-    if restart_needed:
-        try:
-            subprocess.run(
-                ["docker", "compose", "-f", "/app/docker-compose.yml", "restart", "collector"],
-                timeout=10,
-                capture_output=True
-            )
-        except Exception as e:
-            print(f"Error restarting collector: {e}")
-
+    # Note: the collector reads collector_control.json at the top of every poll
+    # cycle, so changes take effect within `poll_interval` seconds. There is no
+    # need to restart the container — and the admin container does not have the
+    # docker CLI installed anyway. Earlier code that called `docker compose
+    # restart collector` from here was dead and noisy; removed 2026-05-08.
     return JSONResponse(content={"success": True, "control": control})
 
 

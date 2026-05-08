@@ -10,6 +10,7 @@ import yaml
 import psycopg2
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timezone
 from psycopg2.extras import execute_values
 
 # Configure logging
@@ -27,6 +28,12 @@ COLLECTOR_STATUS_FILE = os.getenv(
     "COLLECTOR_STATUS_FILE",
     os.path.join(os.path.dirname(COLLECTOR_CONTROL_FILE), "collector_status.json"),
 )
+
+# Device registry + refresh-fleet protocol (admin volume — same dir as the control file)
+_ADMIN_DATA_DIR = os.path.dirname(COLLECTOR_CONTROL_FILE)
+DEVICE_REGISTRY_FILE = os.path.join(_ADMIN_DATA_DIR, "device_registry.json")
+REFRESH_FLEET_REQUEST_FILE = os.path.join(_ADMIN_DATA_DIR, "refresh_fleet_request.json")
+REFRESH_FLEET_RESULT_FILE = os.path.join(_ADMIN_DATA_DIR, "refresh_fleet_result.json")
 
 _logged_poll_interval = None
 
@@ -177,7 +184,24 @@ def _control_defaults() -> dict:
         "device_query_delay": 0.5,
         "parallel_workers": 8,
         "adaptive_backoff": True,
+        # Cap on devices an experiment can poll under focus_level=2 (Strong).
+        # Bounds round time so a tight target_cadence_s (e.g. 10s) is achievable.
+        # POLLING_ANALYSIS_MAY26.md sweep showed fleet sizes above ~12 in a
+        # single chunk start hitting TP-Link's per-second burst behaviour.
+        "experiment_max_devices": 12,
+        # System-wide focus level. 0 = off (ambient polling for everyone at
+        # poll_interval), 2 = strong (only the running experiment's devices
+        # polled at its target_cadence_s, others paused). Level 1 (Mid —
+        # interleaved cadences) is captured as CR-001 and not yet implemented.
+        "focus_level": 0,
     }
+
+
+# Paths to the experiment + group files (admin's volume); collector reads
+# these at the top of each cycle in Focus Mode to discover the active focus.
+EXPERIMENTS_FILE = os.path.join(_ADMIN_DATA_DIR, "experiments.json")
+DEVICE_GROUPS_FILE = os.path.join(_ADMIN_DATA_DIR, "device_groups.json")
+ANNOTATIONS_FILE = os.path.join(_ADMIN_DATA_DIR, "annotations.json")
 
 
 def read_collector_control() -> dict:
@@ -292,6 +316,7 @@ class AdaptiveBackoff:
         rate_hits: int,
         cycle_completed: bool,
         last_error: str | None = None,
+        focus_state: dict | None = None,
     ) -> None:
         try:
             ts_utc = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -325,6 +350,7 @@ class AdaptiveBackoff:
                 },
                 "last_cycle_ok": cycle_completed,
                 "last_error": last_error or "",
+                "focus": focus_state or {"active": False},
             }
             d = os.path.dirname(self.status_path)
             if d:
@@ -569,8 +595,7 @@ def collect_power_readings(deviceIdList, accessToken, parallel_workers, device_q
                 if device_query_delay > 0:
                     time.sleep(device_query_delay)
                 continue
-            current_GMT = time.gmtime()
-            timestamp = calendar.timegm(current_GMT)
+            timestamp = time.time()  # float, sub-second precision (was integer-truncated)
             points_buffer.append(
                 {"alias": alias, "power_watts": float(devPower), "time": timestamp}
             )
@@ -588,8 +613,7 @@ def collect_power_readings(deviceIdList, accessToken, parallel_workers, device_q
                     if devPower is None:
                         failed_devices.append(alias)
                         continue
-                    current_GMT = time.gmtime()
-                    timestamp = calendar.timegm(current_GMT)
+                    timestamp = time.time()  # float, sub-second precision
                     points_buffer.append(
                         {
                             "alias": alias,
@@ -679,8 +703,300 @@ def load_config():
     return config
 
 
-def pollCloud(config, db_conn, accessToken, eff):
-    """eff: dict from AdaptiveBackoff.effective() with parallel_workers and device_query_delay."""
+def _load_focus_state(control: dict):
+    """
+    Resolve the system-wide focus state for this cycle. Returns:
+        (experiment_id, target_cadence_s, set_of_device_aliases)
+    when system focus_level=2 AND a current experiment exists,
+    otherwise (None, None, None) — collector falls back to ambient.
+
+    System focus_level lives in collector_control.json (not per-experiment),
+    so an operator can flip Off↔Strong from /exploration without editing the
+    running experiment. The experiment still carries its preferred
+    target_cadence_s (the cadence the operator wants when focus is on).
+
+    Devices in the registry's excluded/archived lifecycle are filtered out
+    here too (matches ambient mode behaviour — operator-paused devices are
+    paused everywhere).
+    """
+    focus_level = 0
+    try:
+        focus_level = int(control.get('focus_level', 0) or 0)
+    except (TypeError, ValueError):
+        focus_level = 0
+    # Level 1 (Mid) is deferred to CR-001 — for now treat anything other than
+    # 2 as "off" so the collector behaves identically to before this knob landed.
+    if focus_level != 2:
+        return None, None, None
+
+    try:
+        if not os.path.exists(EXPERIMENTS_FILE):
+            return None, None, None
+        with open(EXPERIMENTS_FILE, 'r', encoding='utf-8') as f:
+            experiments = json.load(f) or {}
+        if not isinstance(experiments, dict):
+            return None, None, None
+
+        focus_exp_id = None
+        focus_exp = None
+        for exp_id, exp in experiments.items():
+            if not isinstance(exp, dict):
+                continue
+            if exp.get('is_current'):
+                focus_exp_id = exp_id
+                focus_exp = exp
+                break
+        if not focus_exp:
+            return None, None, None
+
+        target_cadence_s = int(focus_exp.get('target_cadence_s') or 10)
+        if target_cadence_s < 5 or target_cadence_s > 300:
+            target_cadence_s = 10
+
+        # Resolve linked_groups → aliases
+        groups = {}
+        if os.path.exists(DEVICE_GROUPS_FILE):
+            try:
+                with open(DEVICE_GROUPS_FILE, 'r', encoding='utf-8') as f:
+                    groups = json.load(f) or {}
+            except (OSError, json.JSONDecodeError):
+                pass
+        aliases = set()
+        for group_name in (focus_exp.get('linked_groups') or []):
+            g = groups.get(group_name)
+            if isinstance(g, dict):
+                for alias in (g.get('devices') or []):
+                    if alias:
+                        aliases.add(alias)
+
+        # Drop excluded/archived (operator wins everywhere)
+        excluded_aliases, _excluded_ids = _load_excluded_keys()
+        if excluded_aliases:
+            aliases -= excluded_aliases
+
+        return focus_exp_id, target_cadence_s, aliases
+    except Exception as e:
+        logger.warning("Could not resolve focus state: %s", e)
+        return None, None, None
+
+
+def _filter_to_focus(deviceIdList, focus_aliases):
+    """In Focus Mode keep ONLY devices whose alias is in the focus set."""
+    return [d for d in deviceIdList if d.get('alias') in focus_aliases]
+
+
+def _append_annotation(experiment_id: str, label: str, description: str = "") -> None:
+    """Append an annotation to annotations.json. Best-effort — never raises."""
+    try:
+        annotations = {}
+        if os.path.exists(ANNOTATIONS_FILE):
+            try:
+                with open(ANNOTATIONS_FILE, 'r', encoding='utf-8') as f:
+                    annotations = json.load(f) or {}
+            except (OSError, json.JSONDecodeError):
+                annotations = {}
+        if not isinstance(annotations, dict):
+            annotations = {}
+
+        ann_id = f"focus-{int(time.time() * 1000)}"
+        annotations[ann_id] = {
+            'id': ann_id,
+            'experiment_id': experiment_id,
+            'timestamp': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+            'label': label,
+            'description': description,
+            'color': '#2d6a4f',
+            'auto_generated': True,
+        }
+        tmp = ANNOTATIONS_FILE + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(annotations, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, ANNOTATIONS_FILE)
+    except Exception as e:
+        logger.warning("Could not write focus annotation: %s", e)
+
+
+def _compute_health(round_s: float, tick_s: float) -> str:
+    """% of tick used by last round → green/yellow/orange/red label."""
+    if tick_s <= 0:
+        return 'unknown'
+    pct = round_s / tick_s
+    if pct <= 0.30:
+        return 'green'
+    if pct <= 0.70:
+        return 'yellow'
+    if pct <= 0.95:
+        return 'orange'
+    return 'red'
+
+
+def _load_excluded_keys():
+    """
+    Read the admin-side device registry and return (excluded_aliases, excluded_device_ids).
+
+    Devices with lifecycle in {excluded, archived} are skipped on every poll cycle —
+    this is the operator's "stop polling this device" signal (see admin UI /manage).
+    Returns empty sets if the registry is missing or malformed; logs at WARNING.
+    """
+    try:
+        if not os.path.exists(DEVICE_REGISTRY_FILE):
+            return set(), set()
+        with open(DEVICE_REGISTRY_FILE, "r", encoding="utf-8") as f:
+            registry = json.load(f)
+        devices = registry.get("devices", {}) if isinstance(registry, dict) else {}
+        aliases, device_ids = set(), set()
+        for alias, dev in devices.items():
+            if not isinstance(dev, dict):
+                continue
+            if dev.get("lifecycle") in ("excluded", "archived"):
+                aliases.add(alias)
+                if dev.get("device_id"):
+                    device_ids.add(dev["device_id"])
+        return aliases, device_ids
+    except (OSError, json.JSONDecodeError, TypeError) as e:
+        logger.warning("Could not read device registry %s: %s", DEVICE_REGISTRY_FILE, e)
+        return set(), set()
+
+
+def _filter_excluded(deviceIdList, excluded_aliases, excluded_device_ids):
+    """Return (kept_devices, skipped_count) honouring registry lifecycle."""
+    if not excluded_aliases and not excluded_device_ids:
+        return deviceIdList, 0
+    kept = []
+    skipped = 0
+    for d in deviceIdList:
+        if d.get("alias") in excluded_aliases or d.get("deviceId") in excluded_device_ids:
+            skipped += 1
+            continue
+        kept.append(d)
+    return kept, skipped
+
+
+def _atomic_write_json(path, payload):
+    """Atomic JSON write — tmp file in the same dir, rename. Mirrors admin/device_registry.py."""
+    parent = os.path.dirname(path) or "."
+    os.makedirs(parent, exist_ok=True)
+    tmp_path = path + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2, sort_keys=True)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp_path, path)
+
+
+def _read_pending_refresh_request():
+    """Return the pending request payload (with request_id) or None."""
+    if not os.path.exists(REFRESH_FLEET_REQUEST_FILE):
+        return None
+    try:
+        with open(REFRESH_FLEET_REQUEST_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict) and data.get("request_id"):
+            return data
+    except (OSError, json.JSONDecodeError) as e:
+        logger.warning("Bad refresh request file: %s", e)
+    return None
+
+
+def _raw_get_device_list(accessToken):
+    """
+    Like getDeviceIdList but returns the raw API list (deviceId/alias/model/online)
+    without filtering by online/model — the registry needs the full picture so the
+    admin UI can show offline-but-known devices and excluded-by-operator devices.
+    """
+    devListurl = 'https://aps1-openapi.tplinknbu.com/v1/getDeviceList?'
+    getDevlistdata = {
+        'client_id': 'fdcae128-0adf-4233-8a58-30760652bd16',
+        'api_key': 'e71bf02f-8b71-42ee-8af0-62a7bdf6c866',
+        'token': accessToken,
+    }
+    devList = requests.post(devListurl, data=getDevlistdata, timeout=15)
+    try:
+        resp = devList.json()
+    except Exception:
+        resp = {}
+    if not isinstance(resp, dict):
+        resp = {}
+
+    if _tplink_is_rate_limited_http(devList.status_code, resp):
+        raise RateLimitError(f"TP-Link getDeviceList rate limited: HTTP {devList.status_code} {resp}")
+    if resp.get('errorCode') == TOKEN_INVALID_ERROR_CODE or str(resp.get("errMessage", "")).lower() == "token invalid":
+        raise TokenInvalidError(f"TP-Link token invalid: {resp}")
+    if resp.get('errorCode') or resp.get('error'):
+        if _tplink_msg_suggests_rate_limit(resp):
+            raise RateLimitError(f"TP-Link getDeviceList rate limited: {resp}")
+        raise RuntimeError(f"TP-Link getDeviceList API error: {resp}")
+
+    devices = resp.get("devices") or []
+    out = []
+    for item in devices:
+        out.append({
+            "deviceId": item.get("deviceId"),
+            "alias": item.get("alias") or item.get("deviceId"),
+            "model": item.get("model") or "",
+            "online": bool(item.get("online")),
+        })
+    return out
+
+
+def handle_refresh_fleet_request(accessToken):
+    """
+    If the admin has dropped a refresh request file, call getDeviceList and write
+    the matching result. Token-invalid is propagated so the caller can refresh and
+    retry on the next iteration. Returns True if a request was processed.
+    """
+    pending = _read_pending_refresh_request()
+    if not pending:
+        return False
+    request_id = pending["request_id"]
+    logger.info("Processing refresh-fleet request %s", request_id)
+
+    try:
+        api_devices = _raw_get_device_list(accessToken)
+        result_payload = {
+            "request_id": request_id,
+            "completed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "ok": True,
+            "error": None,
+            "devices": api_devices,
+        }
+    except TokenInvalidError:
+        # Re-raise so the main loop can refresh and retry on the next iteration
+        raise
+    except (RateLimitError, RuntimeError, requests.RequestException) as e:
+        logger.error("Refresh-fleet request %s failed: %s", request_id, e)
+        result_payload = {
+            "request_id": request_id,
+            "completed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "ok": False,
+            "error": str(e),
+            "devices": [],
+        }
+
+    try:
+        _atomic_write_json(REFRESH_FLEET_RESULT_FILE, result_payload)
+    except OSError as e:
+        logger.error("Could not write refresh-fleet result: %s", e)
+        return True
+    # Best-effort: remove the request file so we don't reprocess
+    try:
+        os.unlink(REFRESH_FLEET_REQUEST_FILE)
+    except OSError:
+        pass
+    return True
+
+
+def pollCloud(config, db_conn, accessToken, eff, focus_aliases=None):
+    """
+    eff: dict from AdaptiveBackoff.effective() with parallel_workers and device_query_delay.
+
+    focus_aliases: if not None, restrict polling to ONLY these device aliases
+    (Focus Mode). Skips devices not in this set even if they're online and
+    in the registry as active. The list call still happens (we need fresh
+    device IDs for the focus aliases).
+    """
     reset_rate_limit_hits()
     try:
         deviceIdList = getDeviceIdList(accessToken)
@@ -693,6 +1009,22 @@ def pollCloud(config, db_conn, accessToken, eff):
         logger.warning("No TP-Link devices to poll (empty list)")
         return
 
+    if focus_aliases is not None:
+        before = len(deviceIdList)
+        deviceIdList = _filter_to_focus(deviceIdList, focus_aliases)
+        logger.info("Focus Mode: %d/%d devices selected for this cycle", len(deviceIdList), before)
+        if not deviceIdList:
+            logger.warning("Focus Mode: none of the experiment's devices are currently online — skipping cycle")
+            return
+
+    excluded_aliases, excluded_device_ids = _load_excluded_keys()
+    deviceIdList, skipped = _filter_excluded(deviceIdList, excluded_aliases, excluded_device_ids)
+    if skipped:
+        logger.info("Skipping %d device(s) marked excluded/archived in registry", skipped)
+    if not deviceIdList:
+        logger.warning("All devices excluded by registry; nothing to poll this cycle")
+        return
+
     getDevicePowerList(
         deviceIdList,
         accessToken,
@@ -703,10 +1035,10 @@ def pollCloud(config, db_conn, accessToken, eff):
     )
 
 
-def do_work(config, db_conn, accessToken, eff):
+def do_work(config, db_conn, accessToken, eff, focus_aliases=None):
     """Execute one collection cycle. Returns True on success, False on failure."""
     try:
-        pollCloud(config, db_conn, accessToken, eff)
+        pollCloud(config, db_conn, accessToken, eff, focus_aliases=focus_aliases)
         return True
     except TokenInvalidError:
         # Allow caller to refresh token and retry
@@ -734,11 +1066,15 @@ def sendToTimescaleDB(db_conn, points_buffer):
         
         cursor = db_conn.cursor()
         
-        # Prepare data for batch insert
+        # Prepare data for batch insert. point['time'] is a float (sub-second
+        # precision). Format with microseconds so the DB row reflects the actual
+        # sample time rather than a truncated integer second — matters for
+        # tick-aligned content where a 10s cadence must look like 10s in the
+        # data, not 9–11s due to second-boundary rounding.
         values = []
         for point in points_buffer:
-            # Convert timestamp to PostgreSQL timestamptz
-            ts = time.strftime('%Y-%m-%d %H:%M:%S+00', time.gmtime(point['time']))
+            dt = datetime.fromtimestamp(point['time'], tz=timezone.utc)
+            ts = dt.strftime('%Y-%m-%d %H:%M:%S.%f+00')
             values.append((ts, point['alias'], point['power_watts']))
         
         # Batch insert using execute_values for efficiency
@@ -809,6 +1145,95 @@ def get_db_connection(config):
     return None
 
 
+def _record_admin_error_collector_side(source: str, message: str, severity: str = "error") -> None:
+    """
+    Append an entry to the admin error log so it surfaces in the /exploration banner.
+    Same file shape as admin/app.py:_record_admin_error. Best-effort; never raises.
+    """
+    try:
+        admin_errors_file = os.path.join(_ADMIN_DATA_DIR, "admin_errors.json")
+        entries = []
+        if os.path.exists(admin_errors_file):
+            try:
+                with open(admin_errors_file, 'r', encoding='utf-8') as f:
+                    raw = json.load(f)
+                if isinstance(raw, list):
+                    entries = raw
+            except Exception:
+                pass
+        import uuid as _uuid
+        entries.append({
+            'id': str(_uuid.uuid4()),
+            'at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+            'source': source,
+            'severity': severity,
+            'message': message,
+        })
+        entries = entries[-25:]
+        os.makedirs(_ADMIN_DATA_DIR, exist_ok=True)
+        tmp = admin_errors_file + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(entries, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, admin_errors_file)
+    except Exception:
+        pass
+
+
+def _try_handle_refresh(accessToken):
+    """Wrap handle_refresh_fleet_request; swallow TokenInvalidError (next cycle retries)."""
+    try:
+        return handle_refresh_fleet_request(accessToken)
+    except TokenInvalidError:
+        logger.info("Refresh-fleet hit token invalid; will retry on next cycle after token refresh")
+        return False
+    except Exception as e:
+        logger.error("Refresh-fleet handler crashed: %s", e, exc_info=True)
+        return False
+
+
+def _sleep_until_with_refresh_check(deadline_monotonic, accessToken, refresh_chunk=2.0):
+    """
+    Sleep until `deadline_monotonic` (a value from time.monotonic()).
+
+    Strategy: while there's plenty of time left (> 2 × refresh_chunk), do
+    short chunked sleeps interleaved with refresh-fleet checks so the admin
+    button responds quickly. For the FINAL 0–4 seconds, do a single
+    sleep_until_deadline so wake-up precision is bounded by the OS's
+    minimum sleep granularity (≲10 ms on Linux) rather than the cumulative
+    overshoot of many chunks (≈50 ms per chunk).
+
+    This matters for Focus Mode where the next-tick anchor must hit close
+    to its target — every ms of wake-up jitter shows up as cadence variance
+    in the DB.
+    """
+    while True:
+        now = time.monotonic()
+        remaining = deadline_monotonic - now
+        if remaining <= 0:
+            return
+        if remaining > refresh_chunk * 2:
+            time.sleep(refresh_chunk)
+            _try_handle_refresh(accessToken)
+        else:
+            # Final segment — one precise sleep to the deadline.
+            time.sleep(max(0.0, deadline_monotonic - time.monotonic()))
+            return
+
+
+def _sleep_with_refresh_check(total_seconds, accessToken, chunk=2.0):
+    """
+    Sleep for `total_seconds`, but check for refresh-fleet requests every `chunk` seconds
+    so the admin button doesn't have to wait a full poll interval.
+
+    Thin wrapper around _sleep_until_with_refresh_check — converts a
+    duration into an absolute monotonic deadline.
+    """
+    deadline = time.monotonic() + max(0.0, float(total_seconds))
+    _sleep_until_with_refresh_check(deadline, accessToken, refresh_chunk=chunk)
+
+
 def main():
     accessToken = getToken()
 
@@ -857,6 +1282,12 @@ def main():
         os.path.dirname(COLLECTOR_CONTROL_FILE), "reset_backoff"
     )
 
+    # Focus Mode tick scheduling — see POLLING_ANALYSIS_MAY26.md §9.
+    # `next_tick` is monotonic-clock anchored. Each tick we compute the
+    # remaining slack; if round time exceeds the tick we record a slip.
+    next_tick = None
+    last_focus_id = None  # for boundary annotations
+
     try:
         while True:
             try:
@@ -871,11 +1302,32 @@ def main():
 
                 last_eff = backoff.effective(control)
 
+                # Process refresh-fleet requests independently of the `enabled` toggle —
+                # discovery doesn't write to the DB, and operators may want to populate
+                # the registry on a freshly-deployed (idle) collector.
+                _try_handle_refresh(accessToken)
+
+                # Resolve focus state for this cycle. System focus_level lives in
+                # control; combined with a running experiment it produces an
+                # alias set. Off level (or no running experiment) returns None.
+                focus_id, focus_tick_s, focus_aliases = _load_focus_state(control)
+                in_focus = focus_id is not None and focus_aliases is not None
+
+                # Boundary annotations on focus enter/exit — best-effort, never raises.
+                if in_focus and last_focus_id != focus_id:
+                    _append_annotation(focus_id, "Focus Mode started",
+                                       f"Polling {len(focus_aliases)} device(s) at {focus_tick_s}s tick")
+                    last_focus_id = focus_id
+                elif not in_focus and last_focus_id is not None:
+                    _append_annotation(last_focus_id, "Focus Mode ended", "")
+                    last_focus_id = None
+
                 # Honor the admin-UI / collector_control.json `enabled` toggle —
                 # if disabled, sleep this cycle without touching TP-Link or the DB.
                 if not control.get("enabled", False):
                     logger.info("Collector disabled (enabled=false in collector_control.json); skipping cycle")
-                    time.sleep(last_eff["poll_interval"])
+                    _sleep_with_refresh_check(last_eff["poll_interval"], accessToken)
+                    next_tick = None  # Reset tick scheduling when paused
                     continue
 
                 # Check if database connection is still alive, reconnect if needed
@@ -901,31 +1353,49 @@ def main():
                             if last_eff
                             else _poll_interval_seconds(config)
                         )
-                        time.sleep(sleep_s)
+                        _sleep_with_refresh_check(sleep_s, accessToken)
                         continue
                     logger.info("Successfully reconnected to database")
 
                 last_err = ""
+                round_t0 = time.monotonic()
                 try:
-                    success = do_work(config, db_conn, accessToken, last_eff)
+                    success = do_work(config, db_conn, accessToken, last_eff,
+                                      focus_aliases=focus_aliases if in_focus else None)
                 except TokenInvalidError:
                     logger.warning("TP-Link token invalid, refreshing access token and retrying cycle")
                     try:
                         accessToken = getToken()
-                        success = do_work(config, db_conn, accessToken, last_eff)
+                        success = do_work(config, db_conn, accessToken, last_eff,
+                                          focus_aliases=focus_aliases if in_focus else None)
                     except Exception as refresh_err:
                         last_err = str(refresh_err)
                         logger.error(f"Token refresh/retry failed: {refresh_err}", exc_info=True)
                         success = False
+                round_s = time.monotonic() - round_t0
 
                 rate_hits = get_rate_limit_hits()
                 backoff.record_cycle(rate_hits, success)
+
+                focus_state = {"active": in_focus}
+                if in_focus:
+                    health = _compute_health(round_s, focus_tick_s)
+                    focus_state.update({
+                        "experiment_id": focus_id,
+                        "target_cadence_s": focus_tick_s,
+                        "device_count": len(focus_aliases),
+                        "last_round_s": round(round_s, 3),
+                        "tick_utilization_pct": round(min(round_s / focus_tick_s * 100, 999.9), 1) if focus_tick_s else None,
+                        "health": health,
+                    })
+
                 backoff.write_status_file(
                     control,
                     last_eff,
                     rate_hits=rate_hits,
                     cycle_completed=bool(success),
                     last_error=last_err or None,
+                    focus_state=focus_state,
                 )
 
                 if success:
@@ -937,8 +1407,35 @@ def main():
                         logger.error(f"Too many consecutive failures ({consecutive_failures}), exiting")
                         sys.exit(1)
 
-                sleep_s = last_eff["poll_interval"]
-                time.sleep(sleep_s)
+                # Sleep — tick-anchored when in Focus Mode (drift-free), else
+                # plain sleep_for after the round (legacy behaviour).
+                if in_focus:
+                    if next_tick is None:
+                        next_tick = round_t0 + focus_tick_s
+                    else:
+                        next_tick += focus_tick_s
+                    if next_tick < time.monotonic():
+                        # Round overran the tick — re-anchor to a future tick so
+                        # the next sample lands at +N×tick from the original
+                        # schedule, dropping in-between readings rather than
+                        # widening cadence.
+                        slack_neg = time.monotonic() - next_tick
+                        slips = int(slack_neg // focus_tick_s) + 1
+                        next_tick += slips * focus_tick_s
+                        msg = (f"Tick slip: round took {round_s:.2f}s on {focus_tick_s}s tick "
+                               f"(skipped {slips} tick(s)); cadence will be wider than configured")
+                        logger.warning(msg)
+                        try:
+                            _record_admin_error_collector_side(source="focus_tick", message=msg)
+                        except Exception:
+                            pass
+                    # Sleep precisely to the next_tick deadline — wake-up jitter
+                    # is bounded by OS sleep granularity (≲10 ms), not by the
+                    # cumulative overshoot of many short chunks.
+                    _sleep_until_with_refresh_check(next_tick, accessToken)
+                else:
+                    next_tick = None
+                    _sleep_with_refresh_check(last_eff["poll_interval"], accessToken)
 
             except KeyboardInterrupt:
                 logger.info("Received keyboard interrupt, shutting down...")
@@ -955,8 +1452,8 @@ def main():
                     if last_eff
                     else _poll_interval_seconds(config)
                 )
-                time.sleep(sleep_s)
-                
+                _sleep_with_refresh_check(sleep_s, accessToken)
+
     finally:
         logger.info("Closing database connection...")
         try:

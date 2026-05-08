@@ -8,12 +8,20 @@
 
 {% block content %}
     <div class="container">
+        <!-- Currently Running panel -->
+        <section class="card">
+            <h2>Currently Running</h2>
+            <div id="runningPanel">
+                <p class="loading">Loading…</p>
+            </div>
+        </section>
+
         <!-- Create New Experiment -->
         <section class="card">
             <h2>Create New Experiment</h2>
             <button id="createExperimentBtn" class="btn btn-primary">Create Experiment</button>
         </section>
-        
+
         <!-- Existing Experiments -->
         <section class="card">
             <h2>Existing Experiments</h2>
@@ -34,6 +42,9 @@
             <h2>Create New Experiment</h2>
             <p style="color: #666; font-size: 0.9rem; margin-bottom: 20px;">
                 Experiments are time-based studies that link to participant groups. Create groups first in "Groups" if needed.
+                <br><br>
+                Leave both times <strong>blank</strong> to create a Draft you'll launch later with the <strong>▶ Start</strong> button.
+                Set <strong>both</strong> times to record a retrospective experiment over a past time window.
             </p>
             <form id="createExperimentForm" onsubmit="createExperiment(event)">
                 <div class="form-group">
@@ -45,40 +56,25 @@
                     <textarea id="experimentDescription" rows="3" placeholder="Optional description of what this experiment is testing"></textarea>
                 </div>
                 <div class="form-group">
-                    <label>Time Range:</label>
+                    <label>Time Range <span style="font-weight: normal; color: #888;">(optional — for retrospective experiments only)</span>:</label>
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
                         <div>
                             <label style="font-size: 0.85rem; color: #666;">Start Time:</label>
-                            <input type="datetime-local" id="experimentStartTime" required>
+                            <input type="datetime-local" id="experimentStartTime">
                         </div>
                         <div>
                             <label style="font-size: 0.85rem; color: #666;">End Time:</label>
                             <input type="datetime-local" id="experimentEndTime">
                         </div>
                     </div>
-                    <div style="margin-top: 10px;">
-                        <label class="toggle-label" style="display: flex; align-items: center; gap: 10px;">
-                            <input type="checkbox" id="experimentIsCurrent" onchange="toggleEndTimeRequired()">
-                            <span>Current Experiment (running now - end time will be set when you stop it)</span>
-                        </label>
-                    </div>
-                    <p style="font-size: 0.85rem; color: #666; margin-top: 5px;">
-                        For past experiments, set both start and end times. For current experiments, only set start time and check "Current Experiment".
+                </div>
+                <div class="form-group">
+                    <label style="font-size: 0.95rem;">Target cadence (seconds):
+                        <input type="number" id="experimentTargetCadence" min="5" max="300" value="10" style="width: 80px; margin-left: 8px;">
+                    </label>
+                    <p style="font-size: 0.85em; color: #666; margin-top: 4px;">
+                        How often this experiment's devices should be polled when system focus is on (toggle from <a href="/exploration">/exploration</a>). Cap of <code>experiment_max_devices</code> applies under Strong focus (default 12).
                     </p>
-                    <script>
-                    function toggleEndTimeRequired() {
-                        const isCurrent = document.getElementById('experimentIsCurrent').checked;
-                        const endTimeInput = document.getElementById('experimentEndTime');
-                        if (isCurrent) {
-                            endTimeInput.required = false;
-                            endTimeInput.disabled = true;
-                            endTimeInput.value = '';
-                        } else {
-                            endTimeInput.required = true;
-                            endTimeInput.disabled = false;
-                        }
-                    }
-                    </script>
                 </div>
                 <div class="form-group">
                     <label>Link Participant Groups:</label>
@@ -123,12 +119,17 @@
                             </div>
                         </div>
                     </div>
-                    <div style="margin-top: 10px;">
-                        <label class="toggle-label" style="display: flex; align-items: center; gap: 10px;">
-                            <input type="checkbox" id="editExperimentIsCurrent">
-                            <span>Current Experiment (running now)</span>
-                        </label>
-                    </div>
+                    <p style="font-size: 0.85rem; color: #666; margin-top: 8px;">
+                        To start or stop the experiment, use the <strong>▶ Start</strong> or <strong>⏹ Stop</strong> buttons on the experiment card. This dialog only edits metadata.
+                    </p>
+                </div>
+                <div class="form-group">
+                    <label style="font-size: 0.95rem;">Target cadence (seconds):
+                        <input type="number" id="editExperimentTargetCadence" min="5" max="300" value="10" style="width: 80px; margin-left: 8px;">
+                    </label>
+                    <p style="font-size: 0.85em; color: #666; margin-top: 4px;">
+                        Used when system focus is on (toggle on /exploration).
+                    </p>
                 </div>
                 <div class="form-group">
                     <label>Link Participant Groups:</label>

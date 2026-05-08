@@ -14,6 +14,29 @@
 {% endblock %}
 
 {% block content %}
+        <!-- Admin error banner — shows operator-visible problems (collector control failures, etc.) -->
+        <div id="adminErrorBanner" class="admin-error-banner" style="display: none;">
+            <div class="admin-error-header">
+                <strong>⚠ Admin issues</strong>
+                <button onclick="dismissAdminErrors()" class="btn btn-small">Dismiss</button>
+            </div>
+            <ul id="adminErrorList"></ul>
+        </div>
+
+        <!-- Focus status strip — visible in the operator's eye-line during experiments.
+             Always rendered. The badge on the left states the current state in plain
+             words (FOCUS OFF / FOCUS ON). The button on the right flips state. -->
+        <div id="focusStrip" class="focus-strip focus-strip-off" style="display: none;">
+            <div class="focus-strip-left">
+                <span class="focus-tag" id="focusStripTag">FOCUS OFF</span>
+                <span id="focusStripDetail" class="focus-strip-detail"></span>
+                <span id="focusStripPill" class="health-pill health-unknown">●</span>
+            </div>
+            <div class="focus-strip-right">
+                <button id="focusToggleBtn" onclick="toggleFocus()" class="btn btn-small">Turn focus on</button>
+            </div>
+        </div>
+
         <!-- Charts Section - AT THE TOP -->
         <section class="charts-section">
             <!-- Chart A -->
@@ -27,6 +50,7 @@
                             <span class="stat-item">Mean: <strong id="meanA">0</strong> W</span>
                             <span class="stat-item">Median: <strong id="medianA">0</strong> W</span>
                         </div>
+                        <button onclick="hideOfflineDevicesInChart('A')" class="btn btn-small" title="Hide all devices that are currently offline or missing from the registry">Hide offline</button>
                         <button onclick="toggleFullscreen('chartContainerA')" class="btn-icon" title="Fullscreen">
                             ⛶
                         </button>
@@ -55,6 +79,7 @@
                             <span class="stat-item">Mean: <strong id="meanB">0</strong> W</span>
                             <span class="stat-item">Median: <strong id="medianB">0</strong> W</span>
                         </div>
+                        <button onclick="hideOfflineDevicesInChart('B')" class="btn btn-small" title="Hide all devices that are currently offline or missing from the registry">Hide offline</button>
                         <button onclick="toggleFullscreen('chartContainerB')" class="btn-icon" title="Fullscreen">
                             ⛶
                         </button>
@@ -214,6 +239,11 @@
                     <span>Polling Enabled</span>
                     <span id="collectorStatus" style="font-size: 0.85rem; color: #666; margin-left: auto;">
                         <span id="collectorRunningStatus">●</span> <span id="collectorStatusText">Loading...</span>
+                        <a id="focusChip" class="focus-chip" href="/experiments" style="display: none; margin-left: 0.6rem;" title="Focus Mode is active. Click to manage on the Experiments page.">
+                            <span class="focus-chip-tag">FOCUS</span>
+                            <span id="focusChipDetail"></span>
+                            <span id="focusChipPill" class="health-pill health-unknown">●</span>
+                        </a>
                     </span>
                 </label>
             </div>
@@ -253,8 +283,21 @@
                     <button id="updateDeviceQueryDelay" class="btn btn-primary" style="margin-left: 10px;">Update</button>
                 </div>
                 <p style="font-size: 0.85rem; color: #666; margin-top: 5px;">
-                    Current: <span id="currentDeviceQueryDelay">-</span>s | 
+                    Current: <span id="currentDeviceQueryDelay">-</span>s |
                     <span style="color: #e74c3c;">⚠️ With parallel workers &gt;1: delay <strong>between chunks</strong> of concurrent calls. With workers =1: delay between each device (sequential).</span>
+                </p>
+            </div>
+
+            <div class="control-group">
+                <label>Focus mode device cap:</label>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <input type="number" id="experimentMaxDevices" min="1" max="50" value="12" step="1" style="width: 80px; padding: 8px; border: 2px solid var(--gos-border); border-radius: 6px;">
+                    <span>devices</span>
+                    <button id="updateExperimentMaxDevices" class="btn btn-primary" style="margin-left: 10px;">Update</button>
+                </div>
+                <p style="font-size: 0.85rem; color: #666; margin-top: 5px;">
+                    Current: <span id="currentExperimentMaxDevices">-</span> · Maximum devices an experiment may link when <strong>Focus On (Strong)</strong> is engaged. Today's TP-Link account hits cleanly at 12 in a single chunk; raise as your fleet/account budget grows. Tested values:
+                    <strong style="color: #2d6a4f;">8 (green)</strong>, <strong style="color: #856404;">12 (yellow at 10s tick)</strong>; above 12 the round time + 429 risk grows non-linearly.
                 </p>
             </div>
 

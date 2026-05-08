@@ -11,32 +11,132 @@
 
 {% block content %}
     <div class="container">
+        <!-- The Fleet -->
+        <section class="card">
+            <div class="fleet-header">
+                <h2>The Fleet</h2>
+                <button id="refreshFleetBtn" class="btn btn-primary" onclick="refreshFleet()">
+                    Refresh Fleet from TP-Link
+                </button>
+            </div>
+            <div id="fleetSummary" class="fleet-summary">
+                {% if fleet.last_refreshed_at %}
+                    Last refreshed <span data-rel-time="{{ fleet.last_refreshed_at }}">{{ fleet.last_refreshed_at }}</span>
+                    {% if fleet.last_refresh_summary %}
+                        &middot;
+                        <span class="summary-online">{{ fleet.last_refresh_summary.online }} online</span>
+                        &middot; <span class="summary-offline">{{ fleet.last_refresh_summary.offline }} offline</span>
+                        {% if fleet.last_refresh_summary.missing %}
+                            &middot; <span class="summary-missing">{{ fleet.last_refresh_summary.missing }} missing</span>
+                        {% endif %}
+                        {% if fleet.last_refresh_summary.newly_discovered %}
+                            &middot; <span class="summary-new">{{ fleet.last_refresh_summary.newly_discovered }} newly discovered</span>
+                        {% endif %}
+                    {% endif %}
+                {% else %}
+                    Fleet not yet refreshed. Click <strong>Refresh Fleet from TP-Link</strong> to discover devices.
+                {% endif %}
+            </div>
+
+            {# Active devices #}
+            <div class="fleet-section">
+                <h3>Active devices ({{ fleet.active|length }})</h3>
+                {% if fleet.active %}
+                    <ul class="fleet-list">
+                        {% for dev in fleet.active %}
+                        <li class="fleet-item" data-alias="{{ dev.alias|e }}">
+                            <span class="status-dot status-{{ dev.status }}" title="{{ dev.status }}"></span>
+                            <span class="device-alias">{{ dev.alias }}</span>
+                            <span class="device-meta">
+                                {% if dev.model %}<span class="model-tag">{{ dev.model }}</span>{% endif %}
+                                <span class="status-label status-label-{{ dev.status }}">{{ dev.status }}</span>
+                                {% if dev.status_checked_at %}
+                                <span class="checked-at" data-rel-time="{{ dev.status_checked_at }}">{{ dev.status_checked_at }}</span>
+                                {% endif %}
+                            </span>
+                            <span class="device-actions">
+                                <button class="btn btn-small" data-action="exclude" data-alias="{{ dev.alias|e }}" title="Stop polling this device. Reactivatable later.">Exclude</button>
+                            </span>
+                        </li>
+                        {% endfor %}
+                    </ul>
+                {% else %}
+                    <p class="empty-state">No active devices. Refresh the fleet above.</p>
+                {% endif %}
+            </div>
+
+            {% if fleet.excluded %}
+            <details class="fleet-section fleet-collapsed">
+                <summary><h3>Excluded ({{ fleet.excluded|length }})</h3><span class="hint">— hidden from pickers, collector skips polling</span></summary>
+                <ul class="fleet-list">
+                    {% for dev in fleet.excluded %}
+                    <li class="fleet-item" data-alias="{{ dev.alias|e }}">
+                        <span class="status-dot status-{{ dev.status }}"></span>
+                        <span class="device-alias">{{ dev.alias }}</span>
+                        <span class="device-meta">
+                            {% if dev.lifecycle_reason %}<span class="reason">{{ dev.lifecycle_reason }}</span>{% endif %}
+                            <span class="status-label">last seen {{ dev.status }}</span>
+                        </span>
+                        <span class="device-actions">
+                            <button class="btn btn-small" data-action="reactivate" data-alias="{{ dev.alias|e }}">Reactivate</button>
+                        </span>
+                    </li>
+                    {% endfor %}
+                </ul>
+            </details>
+            {% endif %}
+
+            {% if fleet.archived %}
+            <details class="fleet-section fleet-collapsed">
+                <summary><h3>Archived ({{ fleet.archived|length }})</h3><span class="hint">— retired devices; historical data preserved</span></summary>
+                <ul class="fleet-list">
+                    {% for dev in fleet.archived %}
+                    <li class="fleet-item" data-alias="{{ dev.alias|e }}">
+                        <span class="status-dot status-{{ dev.status }}"></span>
+                        <span class="device-alias">{{ dev.alias }}</span>
+                        <span class="device-meta">
+                            {% if dev.lifecycle_reason %}<span class="reason">{{ dev.lifecycle_reason }}</span>{% endif %}
+                        </span>
+                        <span class="device-actions">
+                            <button class="btn btn-small" data-action="reactivate" data-alias="{{ dev.alias|e }}">Reactivate</button>
+                        </span>
+                    </li>
+                    {% endfor %}
+                </ul>
+            </details>
+            {% endif %}
+        </section>
+
         <!-- Create New Group -->
         <section class="card">
             <h2>Create New Group</h2>
             <form id="createGroupForm" onsubmit="createGroup(event)">
                 <div class="form-group">
                     <label for="groupName">Group Name:</label>
-                    <input type="text" id="groupName" name="groupName" required 
+                    <input type="text" id="groupName" name="groupName" required
                            placeholder="e.g. Display Devices">
                 </div>
-                
+
                 <div class="form-group">
-                    <label>Select Devices:</label>
+                    <label>Select Devices from Fleet:</label>
                     <div class="device-checkboxes" id="deviceCheckboxes">
-                        {% for device in devices %}
+                        {% for dev in fleet.active %}
                         <label class="checkbox-label">
-                            <input type="checkbox" name="devices" value="{{ device }}">
-                            <span>{{ device }}</span>
+                            <input type="checkbox" name="devices" value="{{ dev.alias }}">
+                            <span class="status-dot status-{{ dev.status }}" title="{{ dev.status }}"></span>
+                            <span>{{ dev.alias }}</span>
                         </label>
                         {% endfor %}
                     </div>
+                    {% if not fleet.active %}
+                    <p class="empty-state">No active devices in the fleet yet. Refresh the fleet above.</p>
+                    {% endif %}
                     <div class="checkbox-actions">
                         <button type="button" onclick="selectAll()">Select All</button>
                         <button type="button" onclick="selectNone()">Deselect All</button>
                     </div>
                 </div>
-                
+
                 <button type="submit" class="btn btn-primary">Create Group</button>
             </form>
         </section>
@@ -82,7 +182,7 @@
             <h2>Edit Group: <span id="editGroupName"></span></h2>
             <form id="editGroupForm" onsubmit="updateGroup(event)">
                 <div class="form-group">
-                    <label>Select Devices:</label>
+                    <label>Select Devices from Fleet:</label>
                     <div class="device-checkboxes" id="editDeviceCheckboxes">
                         <!-- Populated by JavaScript -->
                     </div>

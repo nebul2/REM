@@ -370,3 +370,399 @@ body {
 .device-checkboxes::-webkit-scrollbar-thumb:hover {
     background: var(--gos-green-dark);
 }
+
+/* ===========================================================================
+ * Fleet (device registry) on /manage
+ * =========================================================================== */
+
+.fleet-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 0.5rem;
+}
+
+.fleet-summary {
+    color: var(--gos-gray-dark);
+    font-size: 0.95em;
+    margin-bottom: 1.25rem;
+    opacity: 0.85;
+}
+
+.fleet-summary.refreshing {
+    opacity: 0.5;
+    font-style: italic;
+}
+
+.fleet-summary .summary-online   { color: #2d6a4f; font-weight: 600; }
+.fleet-summary .summary-offline  { color: #c0392b; font-weight: 600; }
+.fleet-summary .summary-missing  { color: #7f8c8d; font-weight: 600; }
+.fleet-summary .summary-new      { color: var(--gos-green-dark); font-weight: 600; }
+
+.fleet-section {
+    margin-top: 1.25rem;
+}
+
+.fleet-section h3 {
+    display: inline;
+    margin: 0;
+    font-size: 1.05em;
+    color: var(--gos-gray-dark);
+}
+
+.fleet-section .hint {
+    color: #7f8c8d;
+    font-size: 0.9em;
+    margin-left: 0.4rem;
+}
+
+details.fleet-section {
+    border-top: 1px solid var(--gos-border);
+    padding-top: 0.6rem;
+}
+
+details.fleet-section > summary {
+    cursor: pointer;
+    list-style: none;
+    padding: 0.3rem 0;
+}
+
+details.fleet-section > summary::-webkit-details-marker { display: none; }
+
+details.fleet-section > summary::before {
+    content: '▸ ';
+    color: var(--gos-green-dark);
+    font-weight: bold;
+    margin-right: 0.3em;
+}
+
+details.fleet-section[open] > summary::before { content: '▾ '; }
+
+.fleet-list {
+    list-style: none;
+    padding: 0;
+    margin: 0.6rem 0 0;
+}
+
+.fleet-item {
+    display: grid;
+    grid-template-columns: auto 1fr auto auto;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.5rem 0.4rem;
+    border-bottom: 1px solid var(--gos-border);
+}
+
+.fleet-item:last-child { border-bottom: 0; }
+
+.device-alias {
+    font-weight: 600;
+    color: var(--gos-gray-dark);
+}
+
+.device-meta {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    font-size: 0.88em;
+    color: #6c7a72;
+}
+
+.model-tag {
+    background: var(--gos-gray);
+    border: 1px solid var(--gos-border);
+    border-radius: 3px;
+    padding: 0.1em 0.4em;
+    font-size: 0.85em;
+    color: var(--gos-gray-dark);
+}
+
+.status-dot {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #bdc3c7;
+    flex: 0 0 auto;
+    border: 1px solid rgba(0,0,0,0.15);
+}
+
+.status-online   { background: #27ae60; }
+.status-offline  { background: #c0392b; }
+.status-missing  { background: #95a5a6; }
+.status-unknown  { background: #d5d5d5; }
+
+.status-label {
+    text-transform: uppercase;
+    font-size: 0.72em;
+    letter-spacing: 0.05em;
+    color: #7f8c8d;
+}
+
+.status-label-online   { color: #2d6a4f; }
+.status-label-offline  { color: #c0392b; }
+.status-label-missing  { color: #7f8c8d; }
+.status-label-unknown  { color: #95a5a6; }
+
+.checked-at {
+    color: #95a5a6;
+    font-size: 0.85em;
+}
+
+.reason {
+    font-style: italic;
+    color: #7f8c8d;
+}
+
+.device-actions {
+    display: flex;
+    gap: 0.4rem;
+}
+
+.checkbox-label .status-dot {
+    margin: 0 0.4em 0 0.2em;
+}
+
+/* ===========================================================================
+ * Experiment Manager — Currently Running panel + status badges
+ * =========================================================================== */
+
+.running-panel {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.75rem 1rem;
+    border-radius: 6px;
+    border: 1px solid var(--gos-border);
+}
+
+.running-panel-empty {
+    background: var(--gos-gray);
+    color: var(--gos-gray-dark);
+}
+
+.running-panel-active {
+    background: #e8f5e9;
+    border-color: #2d6a4f;
+    color: var(--gos-gray-dark);
+}
+
+.running-panel + .running-panel {
+    margin-top: 0.5rem;
+}
+
+.running-icon {
+    font-size: 1.6rem;
+    line-height: 1;
+    color: var(--gos-green-dark);
+}
+
+.running-panel-empty .running-icon {
+    color: #95a5a6;
+}
+
+.running-title {
+    font-weight: 700;
+    font-size: 1.05rem;
+    margin-bottom: 0.15rem;
+}
+
+.running-sub {
+    color: #6c7a72;
+    font-size: 0.9em;
+}
+
+.running-actions { white-space: nowrap; }
+
+.experiment-state {
+    display: inline-block;
+    font-size: 0.7em;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 0.15em 0.5em;
+    border-radius: 3px;
+    margin-right: 0.5rem;
+    vertical-align: middle;
+    font-weight: 600;
+}
+
+.experiment-state.state-running   { background: #2d6a4f; color: #fff; }
+.experiment-state.state-completed { background: var(--gos-gray); color: var(--gos-gray-dark); border: 1px solid var(--gos-border); }
+.experiment-state.state-draft     { background: #f5f5f5; color: #888; border: 1px solid var(--gos-border); }
+.experiment-state.state-stopped   { background: #fff3cd; color: #856404; border: 1px solid #ffeeba; }
+
+/* Focus Mode telemetry on the Currently Running panel */
+.running-focus {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin-top: 0.4rem;
+    padding-top: 0.4rem;
+    border-top: 1px dashed rgba(0,0,0,0.1);
+    font-size: 0.9em;
+    flex-wrap: wrap;
+}
+.focus-tag {
+    background: #2d6a4f;
+    color: #fff;
+    padding: 0.1em 0.5em;
+    border-radius: 3px;
+    font-size: 0.75em;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 700;
+}
+.focus-detail { color: #6c7a72; }
+
+.health-pill {
+    padding: 0.1em 0.5em;
+    border-radius: 999px;
+    font-size: 0.78em;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    border: 1px solid;
+}
+.health-pill.health-green   { background: #d4edda; color: #155724; border-color: #c3e6cb; }
+.health-pill.health-yellow  { background: #fff3cd; color: #856404; border-color: #ffeeba; }
+.health-pill.health-orange  { background: #ffe5b4; color: #874c00; border-color: #ffcc80; }
+.health-pill.health-red     { background: #f8d7da; color: #721c24; border-color: #f5c6cb; }
+.health-pill.health-unknown { background: #ecf0f1; color: #7f8c8d; border-color: #bdc3c7; }
+
+/* Focus chip on /exploration — small, discreet, links to /experiments */
+.focus-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4em;
+    padding: 0.15em 0.5em;
+    background: #e8f5e9;
+    border: 1px solid #2d6a4f;
+    border-radius: 999px;
+    font-size: 0.85em;
+    color: #1c4632;
+    text-decoration: none;
+    vertical-align: middle;
+}
+.focus-chip:hover { background: #d4edda; }
+.focus-chip-tag {
+    background: #2d6a4f;
+    color: #fff;
+    padding: 0.05em 0.5em;
+    border-radius: 999px;
+    font-size: 0.75em;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+}
+.focus-chip .health-pill {
+    font-size: 0.78em;
+    padding: 0 0.5em;
+    border: 0;
+    background: transparent;
+}
+.focus-chip .health-pill.health-green   { color: #155724; }
+.focus-chip .health-pill.health-yellow  { color: #856404; }
+.focus-chip .health-pill.health-orange  { color: #874c00; }
+.focus-chip .health-pill.health-red     { color: #721c24; }
+.focus-chip .health-pill.health-unknown { color: #7f8c8d; }
+
+/* Top-of-page focus strip on /exploration — primary live-monitoring surface
+   during experiments. Bigger and more prominent than the chip. */
+.focus-strip {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.7rem 1rem;
+    margin-bottom: 1rem;
+    background: #e8f5e9;
+    border: 1px solid #2d6a4f;
+    border-radius: 6px;
+    font-size: 0.95rem;
+}
+.focus-strip-left {
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+    flex: 1;
+}
+.focus-strip-detail {
+    color: #1c4632;
+    font-variant-numeric: tabular-nums;
+}
+.focus-strip .health-pill {
+    font-size: 0.85em;
+    padding: 0.15em 0.7em;
+}
+.focus-strip-right {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+.focus-strip-toggle-label {
+    color: #6c7a72;
+    font-size: 0.9em;
+    margin-right: 0.3em;
+}
+
+.focus-strip.focus-strip-off {
+    background: var(--gos-gray);
+    border-color: var(--gos-border);
+}
+.focus-strip.focus-strip-off .focus-tag {
+    background: #95a5a6;
+    letter-spacing: 0.06em;
+}
+.focus-strip.focus-strip-off .focus-strip-detail {
+    color: #6c7a72;
+}
+
+/* Make the badge text bigger/more readable since it now states the state */
+.focus-strip .focus-tag {
+    font-size: 0.82em;
+    padding: 0.2em 0.7em;
+}
+
+/* ===========================================================================
+ * Admin error banner — surfaces /api/admin/errors on /exploration
+ * =========================================================================== */
+
+.admin-error-banner {
+    background: #fdecea;
+    border: 1px solid #f5b7b1;
+    color: #7b241c;
+    border-radius: 6px;
+    padding: 0.75rem 1rem;
+    margin-bottom: 1rem;
+}
+
+.admin-error-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 0.5rem;
+}
+
+.admin-error-banner ul {
+    margin: 0;
+    padding-left: 1.25rem;
+    font-size: 0.92em;
+}
+
+.admin-error-banner li { margin: 0.2em 0; }
+
+.admin-error-when {
+    color: #95a5a6;
+    font-variant-numeric: tabular-nums;
+    font-size: 0.85em;
+    margin-right: 0.4em;
+}
+
+.admin-error-source {
+    background: rgba(0,0,0,0.05);
+    padding: 0.05em 0.4em;
+    border-radius: 3px;
+    font-size: 0.85em;
+    margin-right: 0.4em;
+}
