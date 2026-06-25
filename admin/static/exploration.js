@@ -15,16 +15,16 @@ let experiments = {}; // Time-based experiments with ranges and group links
 let annotations = {};
 let annotationPopups = {}; // Track open annotation popups
 let showDevices = true;
-let showMean = true;
-let showMedian = true;
-let showTotal = true;
-let showAverage = true;
+let showMean = false;
+let showMedian = false;
+let showTotal = false;
+let showAverage = false;
 
 // Store chart data for recalculation when legend items are toggled
 let chartDataA = null; // {data, devices, stats, experiment}
 let chartDataB = null;
 let splitCharts = false; // false = overlay mode (default), true = split mode
-let curveType = 'smooth'; // Options: 'linear', 'smooth', 'monotone', 'step', 'stepped-after'
+let curveType = 'step'; // Options: 'linear', 'smooth', 'monotone', 'step', 'stepped-after'
 let autoUpdate = true; // Auto-update chart with new data (default: enabled)
 let updateInterval = null; // Store the auto-update interval
 
