@@ -112,6 +112,7 @@ def _experiment_summary(experiment: dict) -> dict:
 def _common_ack_fields(experiment: dict) -> dict:
     return {
         "target_cadence_s": experiment.get("target_cadence_s", 10),
+        "is_current": bool(experiment.get("is_current")),  # is the experiment recording?
         "server_time": _now().isoformat(),
         "session_ttl_s": SESSION_TTL_S,
         "max_batch_rows": MAX_BATCH_ROWS,
