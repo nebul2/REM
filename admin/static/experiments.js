@@ -271,28 +271,56 @@ async function stopExperiment(experimentId) {
     }
 }
 
-// Generate and show a LEM join code (short + long) for an experiment.
+// Show the LEM join code for an experiment (existing one, no rotate), with an
+// explicit "Generate new code" action.
 async function showJoinCode(experimentId) {
     try {
-        const r = await fetch(`/api/experiments/${encodeURIComponent(experimentId)}/field-token`, { method: 'POST' });
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        const d = await r.json();
-        const overlay = document.createElement('div');
-        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:9999';
-        overlay.innerHTML = `
-            <div style="background:#fff;color:#222;padding:24px;border-radius:8px;max-width:520px;font-family:sans-serif">
-                <h3 style="margin-top:0">LEM join code — ${escapeHtml(experimentId)}</h3>
-                <p>Volunteers type this short code into LEM (<code>lem rem join …</code> or the Connect to REM dialog):</p>
-                <div style="font-size:2em;font-weight:bold;letter-spacing:3px;text-align:center;padding:10px;background:#f2f2f2;border-radius:6px">${escapeHtml(d.short_code || '')}</div>
-                <p style="margin-top:14px;font-size:.9em;color:#666">Full code (works without setting a server URL):</p>
-                <textarea readonly style="width:100%;height:52px;font-size:.75em" onclick="this.select()">${escapeHtml(d.join_code || '')}</textarea>
-                <p style="font-size:.85em;color:#a00">Generating a new code replaces any previous one for this experiment.</p>
-                <div style="text-align:right"><button class="btn" onclick="this.closest('div').parentNode.remove()">Close</button></div>
-            </div>`;
-        overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
-        document.body.appendChild(overlay);
+        let short = '', long = '';
+        const r = await fetch(`/api/experiments/${encodeURIComponent(experimentId)}/field`);
+        if (r.ok) {
+            const d = await r.json();
+            if (d.token && d.token.exists) { short = d.token.short_code || ''; long = d.token.join_code || ''; }
+        }
+        if (!short) {  // no code yet — create the first one
+            const c = await fetch(`/api/experiments/${encodeURIComponent(experimentId)}/field-token`, { method: 'POST' });
+            const d = await c.json(); short = d.short_code || ''; long = d.join_code || '';
+        }
+        renderJoinCodeModal(experimentId, short, long);
     } catch (e) {
-        alert('Could not generate join code: ' + e.message);
+        alert('Could not get join code: ' + e.message);
+    }
+}
+
+function renderJoinCodeModal(experimentId, short, long) {
+    const old = document.getElementById('joincode-overlay');
+    if (old) old.remove();
+    const overlay = document.createElement('div');
+    overlay.id = 'joincode-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:9999';
+    overlay.innerHTML = `
+        <div style="background:#fff;color:#222;padding:24px;border-radius:8px;max-width:520px;font-family:sans-serif">
+            <h3 style="margin-top:0">LEM join code — ${escapeHtml(experimentId)}</h3>
+            <p>Volunteers type this short code into LEM (<code>lem rem join …</code> or the Connect to REM dialog):</p>
+            <div style="font-size:2em;font-weight:bold;letter-spacing:3px;text-align:center;padding:10px;background:#f2f2f2;border-radius:6px">${escapeHtml(short)}</div>
+            <p style="margin-top:14px;font-size:.9em;color:#666">Full code (works without setting a server URL):</p>
+            <textarea readonly style="width:100%;height:52px;font-size:.75em" onclick="this.select()">${escapeHtml(long)}</textarea>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px">
+                <button class="btn btn-small" onclick="regenerateJoinCode('${escapeHtml(experimentId)}')" title="Invalidates the current code">Generate new code</button>
+                <button class="btn" onclick="document.getElementById('joincode-overlay').remove()">Close</button>
+            </div>
+        </div>`;
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+    document.body.appendChild(overlay);
+}
+
+async function regenerateJoinCode(experimentId) {
+    if (!confirm('Generate a new code? Any code already handed out will stop working.')) return;
+    try {
+        const c = await fetch(`/api/experiments/${encodeURIComponent(experimentId)}/field-token`, { method: 'POST' });
+        const d = await c.json();
+        renderJoinCodeModal(experimentId, d.short_code || '', d.join_code || '');
+    } catch (e) {
+        alert('Could not generate new code: ' + e.message);
     }
 }
 
@@ -300,6 +328,7 @@ async function showJoinCode(experimentId) {
 window.startExperiment = startExperiment;
 window.stopExperiment = stopExperiment;
 window.showJoinCode = showJoinCode;
+window.regenerateJoinCode = regenerateJoinCode;
 
 // Download full experiment data (raw DB readings + metadata ZIP)
 async function downloadExperimentExport(ev, experimentId) {
