@@ -97,6 +97,7 @@ async function renderRunningPanel(experiments) {
                     ${focusBlock}
                 </div>
                 <div class="running-actions">
+                    <button class="btn" onclick="showJoinCode('${escapeHtml(id)}')" title="Generate a LEM join code for volunteers to stream local measurements into this experiment">🔌 LEM join code</button>
                     <button class="btn btn-danger" onclick="stopExperiment('${escapeHtml(id)}')">⏹ Stop experiment</button>
                 </div>
             </div>
