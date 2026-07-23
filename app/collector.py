@@ -202,6 +202,9 @@ def _control_defaults() -> dict:
 EXPERIMENTS_FILE = os.path.join(_ADMIN_DATA_DIR, "experiments.json")
 DEVICE_GROUPS_FILE = os.path.join(_ADMIN_DATA_DIR, "device_groups.json")
 ANNOTATIONS_FILE = os.path.join(_ADMIN_DATA_DIR, "annotations.json")
+# Written by the admin's field API (field_api.py): aliases currently being
+# measured locally by LEM instances, with per-alias TTL expiry.
+FIELD_SESSIONS_FILE = os.path.join(_ADMIN_DATA_DIR, "field_sessions.json")
 
 
 def read_collector_control() -> dict:
@@ -874,6 +877,28 @@ def _filter_excluded(deviceIdList, excluded_aliases, excluded_device_ids):
     return kept, skipped
 
 
+def _load_field_covered_aliases():
+    """Aliases currently covered by a local LEM measurement session (unexpired
+    TTL in field_sessions.json). Fail open — any error means we keep cloud
+    polling, since data continuity beats API savings."""
+    try:
+        if not os.path.exists(FIELD_SESSIONS_FILE):
+            return set()
+        with open(FIELD_SESSIONS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        now = datetime.now(timezone.utc)
+        covered = set()
+        for alias, info in (data.get("aliases") or {}).items():
+            try:
+                if datetime.fromisoformat(info["expires_at"]) > now:
+                    covered.add(alias)
+            except Exception:
+                continue
+        return covered
+    except Exception:
+        return set()
+
+
 def _atomic_write_json(path, payload):
     """Atomic JSON write — tmp file in the same dir, rename. Mirrors admin/device_registry.py."""
     parent = os.path.dirname(path) or "."
@@ -1024,6 +1049,19 @@ def pollCloud(config, db_conn, accessToken, eff, focus_aliases=None):
     if not deviceIdList:
         logger.warning("All devices excluded by registry; nothing to poll this cycle")
         return
+
+    covered = _load_field_covered_aliases()
+    if covered:
+        before = len(deviceIdList)
+        deviceIdList = [d for d in deviceIdList if d.get("alias") not in covered]
+        if before - len(deviceIdList):
+            logger.info(
+                "Skipping %d device(s) covered by a local LEM measurement session",
+                before - len(deviceIdList),
+            )
+        if not deviceIdList:
+            logger.info("All remaining devices covered by LEM; nothing to cloud-poll this cycle")
+            return
 
     getDevicePowerList(
         deviceIdList,

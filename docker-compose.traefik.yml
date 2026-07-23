@@ -22,6 +22,15 @@ services:
       - "traefik.http.services.stats.loadbalancer.server.port=7001"
       - "traefik.http.routers.stats.middlewares=stats-auth"
       - "traefik.http.middlewares.stats-auth.basicauth.usersfile=/etc/traefik/auth/users.txt"
+      # Field ingest API (LEM clients): higher-priority router WITHOUT the
+      # basicauth middleware — these endpoints carry their own bearer tokens
+      # (see admin/field_api.py). Without this, LEM uploads would 401 at the
+      # proxy before ever reaching the app.
+      - "traefik.http.routers.stats-field.rule=Host(`stats.liveencode.com`) && PathPrefix(`/api/field`)"
+      - "traefik.http.routers.stats-field.priority=100"
+      - "traefik.http.routers.stats-field.entrypoints=websecure"
+      - "traefik.http.routers.stats-field.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.stats-field.service=stats"
       - "traefik.docker.network=traefik-network"
 
 networks:

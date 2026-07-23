@@ -57,8 +57,11 @@ async def basic_auth_middleware(request: Request, call_next):
 
     path = request.url.path
 
-    # Paths that must remain unauthenticated
-    if path.startswith("/health") or path.startswith("/static") or path.startswith("/api/static"):
+    # Paths that must remain unauthenticated. /api/field carries its own
+    # bearer-token auth (see field_api.py) — LEM field clients don't hold
+    # admin credentials.
+    if (path.startswith("/health") or path.startswith("/static")
+            or path.startswith("/api/static") or path.startswith("/api/field")):
         return await call_next(request)
 
     auth = request.headers.get("authorization")
@@ -280,6 +283,24 @@ def save_snapshots(snapshots: dict):
             json.dump(snapshots, f, indent=2)
     except Exception as e:
         print(f"Error saving snapshots: {e}")
+
+
+# ============================================================================
+# Field ingest API (LEM) — see field_api.py
+# ============================================================================
+
+import field_api
+
+field_api.configure(
+    data_dir=DATA_DIR,
+    get_db_connection=get_db_connection,
+    load_groups=load_groups,
+    save_groups=save_groups,
+    load_experiments=load_experiments,
+    save_experiments=save_experiments,
+    public_url=os.getenv("REM_PUBLIC_URL", ""),
+)
+app.include_router(field_api.router)
 
 
 # ============================================================================
