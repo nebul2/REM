@@ -295,24 +295,56 @@ def _join_code(request: Request, experiment_id: str, token: str) -> str:
     return JOIN_CODE_PREFIX + base64.urlsafe_b64encode(blob.encode()).decode()
 
 
+# Unambiguous alphabet (no 0/O/1/I/L) for short codes texted/read aloud.
+_SHORT_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
+
+
+def _new_short_code(tokens: dict) -> str:
+    taken = {e.get("short_code") for e in tokens.values()}
+    while True:
+        code = "".join(secrets.choice(_SHORT_ALPHABET) for _ in range(6))
+        if code not in taken:
+            return code
+
+
 @router.post("/api/experiments/{experiment_id}/field-token")
 def create_field_token(experiment_id: str, request: Request):
     """Create (or rotate — the old code stops working) the experiment's
-    field token, and return the pasteable LEM join code."""
+    field token, and return both the self-contained join code and a short
+    code (for texting; resolved via /api/field/resolve against the server)."""
     _get_experiment_or_410(experiment_id)
     with _lock:
         tokens = _load_json("field_tokens.json", {})
         tokens[experiment_id] = {
             "token": secrets.token_urlsafe(24),
+            "short_code": _new_short_code(tokens),
             "created_at": _now().isoformat(),
         }
         _save_json("field_tokens.json", tokens)
+    entry = tokens[experiment_id]
     return JSONResponse(content={
         "success": True,
         "experiment_id": experiment_id,
-        "join_code": _join_code(request, experiment_id, tokens[experiment_id]["token"]),
-        "created_at": tokens[experiment_id]["created_at"],
+        "join_code": _join_code(request, experiment_id, entry["token"]),
+        "short_code": entry["short_code"],
+        "created_at": entry["created_at"],
     })
+
+
+@router.get("/api/field/resolve/{code}")
+def field_resolve(code: str, request: Request):
+    """Resolve a short code to full join info (token-less endpoint — the short
+    code IS the shared secret, same trust as the long join code)."""
+    code = code.strip().upper()
+    tokens = _load_json("field_tokens.json", {})
+    for eid, entry in tokens.items():
+        if (entry.get("short_code") or "").upper() == code:
+            return JSONResponse(content={
+                "url": _cfg.get("public_url") or str(request.base_url).rstrip("/"),
+                "experiment_id": eid,
+                "token": entry["token"],
+            })
+    raise HTTPException(status_code=404, detail="Unknown or rotated short code")
 
 
 @router.get("/api/experiments/{experiment_id}/field")
@@ -335,6 +367,7 @@ def get_field_info(experiment_id: str, request: Request):
             "exists": entry is not None,
             "created_at": entry["created_at"] if entry else None,
             "join_code": _join_code(request, experiment_id, entry["token"]) if entry else None,
+            "short_code": entry.get("short_code") if entry else None,
         },
         "uploads": status.get("aliases", {}),
         "active_sessions": active,

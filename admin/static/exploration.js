@@ -1352,7 +1352,7 @@ function initializeCharts() {
                         label: function(context) {
                             // Show only the hovered line's label and value
                             const label = context.dataset.label || '';
-                            const value = context.parsed.y !== null && context.parsed.y !== undefined ? context.parsed.y.toFixed(1) + ' W' : 'N/A';
+                            const value = context.parsed.y !== null && context.parsed.y !== undefined ? context.parsed.y.toFixed(2) + ' W' : 'N/A';
                             return `${label}: ${value}`;
                         }
                     },

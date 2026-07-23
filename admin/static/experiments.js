@@ -186,6 +186,7 @@ async function loadExperiments() {
                     </h3>
                     <div class="group-actions">
                         ${stateActions}
+                        <button type="button" onclick="showJoinCode('${escapeHtml(experimentId)}')" class="btn btn-small" title="Generate a LEM join code so volunteers can stream local measurements into this experiment">🔌 LEM join code</button>
                         <button type="button" onclick="downloadExperimentExport(event, '${escapeHtml(experimentId)}')" class="btn btn-small" title="ZIP: raw power readings (every poll), metadata, annotations">Download all data</button>
                         <button onclick="editExperiment('${escapeHtml(experimentId)}')" class="btn btn-small">Edit</button>
                         <button onclick="deleteExperiment('${escapeHtml(experimentId)}')" class="btn btn-small btn-danger">Delete</button>
@@ -269,9 +270,35 @@ async function stopExperiment(experimentId) {
     }
 }
 
+// Generate and show a LEM join code (short + long) for an experiment.
+async function showJoinCode(experimentId) {
+    try {
+        const r = await fetch(`/api/experiments/${encodeURIComponent(experimentId)}/field-token`, { method: 'POST' });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const d = await r.json();
+        const overlay = document.createElement('div');
+        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:9999';
+        overlay.innerHTML = `
+            <div style="background:#fff;color:#222;padding:24px;border-radius:8px;max-width:520px;font-family:sans-serif">
+                <h3 style="margin-top:0">LEM join code — ${escapeHtml(experimentId)}</h3>
+                <p>Volunteers type this short code into LEM (<code>lem rem join …</code> or the Connect to REM dialog):</p>
+                <div style="font-size:2em;font-weight:bold;letter-spacing:3px;text-align:center;padding:10px;background:#f2f2f2;border-radius:6px">${escapeHtml(d.short_code || '')}</div>
+                <p style="margin-top:14px;font-size:.9em;color:#666">Full code (works without setting a server URL):</p>
+                <textarea readonly style="width:100%;height:52px;font-size:.75em" onclick="this.select()">${escapeHtml(d.join_code || '')}</textarea>
+                <p style="font-size:.85em;color:#a00">Generating a new code replaces any previous one for this experiment.</p>
+                <div style="text-align:right"><button class="btn" onclick="this.closest('div').parentNode.remove()">Close</button></div>
+            </div>`;
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+        document.body.appendChild(overlay);
+    } catch (e) {
+        alert('Could not generate join code: ' + e.message);
+    }
+}
+
 // Make these globally accessible for inline onclick handlers
 window.startExperiment = startExperiment;
 window.stopExperiment = stopExperiment;
+window.showJoinCode = showJoinCode;
 
 // Download full experiment data (raw DB readings + metadata ZIP)
 async function downloadExperimentExport(ev, experimentId) {
