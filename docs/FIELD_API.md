@@ -1,6 +1,6 @@
 # Field Ingest API (LEM)
 
-REM's field API lets **LEM** (Local Energy Measurement) instances stream
+REM's field API lets **[LEM](https://github.com/nebul2/LEM)** (Local Energy Measurement) instances stream
 locally-measured power into a REM experiment. It complements the cloud
 collector: volunteers who run LEM measure their own plugs over the LAN (no
 TP-Link cloud calls) and push the data here, under the **same Tapo nickname**

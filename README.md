@@ -12,6 +12,7 @@ A Docker-based system for collecting real-time power consumption data from TP-Li
 - **[User Guide](docs/USER_GUIDE.md)** - Complete guide to using the GOS REM Data Exploration Tool
 - **[Changelog](docs/CHANGELOG.md)** - Version history and release notes
 - **[Documentation](docs/)** - All development notes and detailed guides
+- **[LEM (companion project)](https://github.com/nebul2/LEM)** - Local Energy Measurement: a lab/field tool that measures plugs over the LAN (no TP-Link cloud) and streams into REM experiments. See the [Field API](docs/FIELD_API.md).
 
 ---
 
