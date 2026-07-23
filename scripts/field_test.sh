@@ -26,14 +26,14 @@ case "${1:-}" in
   setup)
     now="$(python3 -c 'from datetime import datetime,timezone; print(datetime.now(timezone.utc).isoformat())')"
     echo "Creating experiment '$EXP_NAME' (id: $EXP_ID), current from $now ..."
-    curl -fsS "${AUTH[@]}" -X POST "$BASE_URL/api/experiments" \
+    curl -fsS "${AUTH[@]+"${AUTH[@]}"}" -X POST "$BASE_URL/api/experiments" \
       --data-urlencode "name=$EXP_NAME" \
       --data-urlencode "is_current=true" \
       --data-urlencode "start_time=$now" \
       --data-urlencode "target_cadence_s=10" >/dev/null || \
       echo "  (experiment may already exist — continuing)"
     echo "Minting a field join code ..."
-    resp="$(curl -fsS "${AUTH[@]}" -X POST "$BASE_URL/api/experiments/$EXP_ID/field-token")"
+    resp="$(curl -fsS "${AUTH[@]+"${AUTH[@]}"}" -X POST "$BASE_URL/api/experiments/$EXP_ID/field-token")"
     code="$(printf '%s' "$resp" | python3 -c 'import sys,json; print(json.load(sys.stdin)["join_code"])')"
     echo
     echo "  Join code (paste into LEM):"
@@ -50,12 +50,12 @@ case "${1:-}" in
        FROM gos_rem GROUP BY alias ORDER BY rows DESC;"
     echo
     echo "Field upload status (server-side):"
-    curl -fsS "${AUTH[@]}" "$BASE_URL/api/experiments/$EXP_ID/field" | python3 -m json.tool
+    curl -fsS "${AUTH[@]+"${AUTH[@]}"}" "$BASE_URL/api/experiments/$EXP_ID/field" | python3 -m json.tool
     ;;
 
   cleanup)
-    curl -fsS "${AUTH[@]}" -X DELETE "$BASE_URL/api/experiments/$EXP_ID/field-token" >/dev/null || true
-    curl -fsS "${AUTH[@]}" -X DELETE "$BASE_URL/api/experiments/$EXP_ID" >/dev/null || true
+    curl -fsS "${AUTH[@]+"${AUTH[@]}"}" -X DELETE "$BASE_URL/api/experiments/$EXP_ID/field-token" >/dev/null || true
+    curl -fsS "${AUTH[@]+"${AUTH[@]}"}" -X DELETE "$BASE_URL/api/experiments/$EXP_ID" >/dev/null || true
     echo "Removed test experiment '$EXP_ID' and its field token."
     echo "(Measurement rows stay in gos_rem; drop them with:"
     echo "  docker exec $DB_CONTAINER psql -U ${POSTGRES_USER:-gos} -d ${POSTGRES_DB:-gos_rem} -c \\"
