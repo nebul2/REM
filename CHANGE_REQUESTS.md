@@ -217,3 +217,11 @@ exploration live-plot JS. Estimate after the open questions are settled.
 
 **Related:** builds on the field ingest API (CR-shipped 2026-07-23); the rogue-
 LEM concern overlaps the planned REM stress-test / rate-limiting work.
+
+**Confirmed 2026-07-24:** tested with a Tapo plug (`Lab-A`) deliberately *not*
+shared to the measurement@ account — a stand-in for the Shelly "device REM
+never knew" case. Result: the data **lands correctly and links to the live
+experiment** (auto-group works), but the device only appears on the live plot
+**after a manual page refresh** — the exploration front-end builds its device
+set at load and doesn't pick up newly-arrived field aliases. So the remaining
+work here is squarely the **live-plot dynamic-add**, not the ingest path.
